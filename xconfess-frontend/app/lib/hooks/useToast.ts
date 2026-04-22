@@ -14,6 +14,10 @@ const DEFAULT_DURATION = 3000;
 export const useToast = () => {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
+  const removeToast = useCallback((id: string) => {
+    setToasts((prev) => prev.filter((toast) => toast.id !== id));
+  }, []);
+
   const addToast = useCallback(
     (
       message: string,
@@ -35,10 +39,6 @@ export const useToast = () => {
     },
     [removeToast]
   );
-
-  const removeToast = useCallback((id: string) => {
-    setToasts((prev) => prev.filter((toast) => toast.id !== id));
-  }, []);
 
   const success = useCallback(
     (message: string, duration?: number) => addToast(message, 'success', duration),

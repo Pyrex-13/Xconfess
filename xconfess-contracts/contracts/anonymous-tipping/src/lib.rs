@@ -1,11 +1,10 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env,
+    contract, contracterror, contractevent, contractimpl, contracttype, Address, Env,
     String as SorobanString,
 };
 
-const SETTLEMENT_EVENT: soroban_sdk::Symbol = symbol_short!("tip_settl");
 const EVENT_VERSION_V1: u32 = 1;
 
 #[contracterror]
@@ -30,9 +29,22 @@ enum DataKey {
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SettlementReceiptEvent {
+    pub recipient: Address,
     pub event_version: u32,
     pub settlement_id: u64,
+    pub amount: i128,
+    pub proof_metadata: SorobanString,
+    pub proof_present: bool,
+    pub timestamp: u64,
+}
+
+#[contractevent(topics = ["tip_settl"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SettlementEvent {
+    #[topic]
     pub recipient: Address,
+    pub event_version: u32,
+    pub settlement_id: u64,
     pub amount: i128,
     pub proof_metadata: SorobanString,
     pub proof_present: bool,
@@ -55,11 +67,7 @@ impl AnonymousTipping {
     }
 
     /// Send anonymous tip to a recipient
-    pub fn send_tip(
-        env: Env,
-        recipient: Address,
-        amount: i128,
-    ) -> Result<u64, Error> {
+    pub fn send_tip(env: Env, recipient: Address, amount: i128) -> Result<u64, Error> {
         Self::send_tip_with_proof(env, recipient, amount, None)
     }
 
@@ -89,9 +97,7 @@ impl AnonymousTipping {
             .instance()
             .get::<_, i128>(&DataKey::RecipientTotal(recipient.clone()))
             .unwrap_or(0_i128);
-        let next_total = previous
-            .checked_add(amount)
-            .ok_or(Error::TotalOverflow)?;
+        let next_total = previous.checked_add(amount).ok_or(Error::TotalOverflow)?;
         env.storage()
             .instance()
             .set(&DataKey::RecipientTotal(recipient.clone()), &next_total);
@@ -107,16 +113,16 @@ impl AnonymousTipping {
             .instance()
             .set(&DataKey::SettlementNonce, &settlement_id);
 
-        let payload = SettlementReceiptEvent {
+        SettlementEvent {
+            recipient,
             event_version: EVENT_VERSION_V1,
             settlement_id,
-            recipient: recipient.clone(),
             amount,
             proof_metadata: metadata.clone(),
-            proof_present: metadata.len() > 0,
+            proof_present: !metadata.is_empty(),
             timestamp: env.ledger().timestamp(),
-        };
-        env.events().publish((SETTLEMENT_EVENT, recipient), payload);
+        }
+        .publish(&env);
 
         Ok(settlement_id)
     }

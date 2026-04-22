@@ -3,20 +3,18 @@
 #[path = "confession_reg_auth.rs"]
 mod confession_reg_auth;
 
-use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env, Symbol, Vec,
-};
+use soroban_sdk::{contract, contractevent, contractimpl, contracttype, Address, BytesN, Env, Vec};
 
 #[path = "../../access_control.rs"]
 mod access_control;
+#[path = "../../emergency_pause/mod.rs"]
+mod emergency_pause;
 #[path = "../../error.rs"]
 mod error;
 #[path = "../../events.rs"]
 mod events;
 #[path = "../../governance/mod.rs"]
 mod governance;
-#[path = "../../emergency_pause/mod.rs"]
-mod emergency_pause;
 // mod confession_reg_auth;
 
 // ─── Data Types ───
@@ -46,6 +44,35 @@ pub struct Confession {
     pub updated_at: u64,
     /// Current status of the confession.
     pub status: ConfessionStatus,
+}
+
+#[contractevent(topics = ["confession_created"], data_format = "vec")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConfessionCreatedEvent {
+    #[topic]
+    pub id: u64,
+    pub author: Address,
+    pub content_hash: BytesN<32>,
+    pub timestamp: u64,
+}
+
+#[contractevent(topics = ["confession_updated"], data_format = "vec")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConfessionUpdatedEvent {
+    #[topic]
+    pub id: u64,
+    pub old_status: ConfessionStatus,
+    pub new_status: ConfessionStatus,
+    pub timestamp: u64,
+}
+
+#[contractevent(topics = ["confession_deleted"], data_format = "vec")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConfessionDeletedEvent {
+    #[topic]
+    pub id: u64,
+    pub caller: Address,
+    pub timestamp: u64,
 }
 
 /// Storage keys used by the contract.
@@ -135,8 +162,7 @@ impl ConfessionRegistry {
         author.require_auth();
 
         // Check if paused — use shared emergency pause module
-        emergency_pause::assert_not_paused(&env)
-            .unwrap_or_else(|err| panic!("{}", err as u32));
+        emergency_pause::assert_not_paused(&env).unwrap_or_else(|err| panic!("{}", err as u32));
 
         // Enforce uniqueness on content_hash
         if env
@@ -185,9 +211,13 @@ impl ConfessionRegistry {
             .set(&DataKey::AuthorConfessions(author.clone()), &author_ids);
 
         // Emit event
-        let event_topic = Symbol::new(&env, "confession_created");
-        env.events()
-            .publish((event_topic, id), (author, content_hash, timestamp));
+        ConfessionCreatedEvent {
+            id,
+            author,
+            content_hash,
+            timestamp,
+        }
+        .publish(&env);
 
         id
     }
@@ -245,8 +275,7 @@ impl ConfessionRegistry {
         caller.require_auth();
 
         // Check if paused — use shared emergency pause module
-        emergency_pause::assert_not_paused(&env)
-            .unwrap_or_else(|err| panic!("{}", err as u32));
+        emergency_pause::assert_not_paused(&env).unwrap_or_else(|err| panic!("{}", err as u32));
 
         let mut confession: Confession = env
             .storage()
@@ -278,11 +307,13 @@ impl ConfessionRegistry {
             .instance()
             .set(&DataKey::Confession(id), &confession);
 
-        let event_topic = Symbol::new(&env, "confession_updated");
-        env.events().publish(
-            (event_topic, id),
-            (old_status, confession.status, timestamp),
-        );
+        ConfessionUpdatedEvent {
+            id,
+            old_status,
+            new_status: confession.status,
+            timestamp,
+        }
+        .publish(&env);
     }
 
     // ─── Delete ───
@@ -296,8 +327,7 @@ impl ConfessionRegistry {
         caller.require_auth();
 
         // Check if paused — use shared emergency pause module
-        emergency_pause::assert_not_paused(&env)
-            .unwrap_or_else(|err| panic!("{}", err as u32));
+        emergency_pause::assert_not_paused(&env).unwrap_or_else(|err| panic!("{}", err as u32));
 
         let mut confession: Confession = env
             .storage()
@@ -327,8 +357,12 @@ impl ConfessionRegistry {
             .instance()
             .set(&DataKey::Confession(id), &confession);
 
-        let event_topic = Symbol::new(&env, "confession_deleted");
-        env.events().publish((event_topic, id), (caller, timestamp));
+        ConfessionDeletedEvent {
+            id,
+            caller,
+            timestamp,
+        }
+        .publish(&env);
     }
 }
 
@@ -342,7 +376,7 @@ mod test {
     fn setup() -> (Env, ConfessionRegistryClient<'static>, Address, Address) {
         let env = Env::default();
         env.mock_all_auths();
-        let contract_id = env.register_contract(None, ConfessionRegistry);
+        let contract_id = env.register(ConfessionRegistry, ());
         let client = ConfessionRegistryClient::new(&env, &contract_id);
 
         let admin = Address::generate(&env);
@@ -548,7 +582,7 @@ mod test {
 
     #[test]
     fn test_execute_without_quorum() {
-        let (env, client, admin, _author) = setup();
+        let (_env, client, admin, _author) = setup();
         client.set_quorum(&2);
 
         let id = client.gov_propose(&admin, &governance::model::CriticalAction::Pause);
@@ -559,7 +593,7 @@ mod test {
 
     #[test]
     fn test_governance_revoke() {
-        let (env, client, admin, _author) = setup();
+        let (_env, client, admin, _author) = setup();
         let id = client.gov_propose(&admin, &governance::model::CriticalAction::Pause);
 
         client.gov_approve(&admin, &id);
@@ -596,7 +630,7 @@ mod test {
     #[test]
     #[should_panic(expected = "already initialized")]
     fn test_double_initialization() {
-        let (env, client, admin, _author) = setup();
+        let (env, client, _admin, _author) = setup();
         let another = Address::generate(&env);
         client.initialize(&another); // should panic
     }

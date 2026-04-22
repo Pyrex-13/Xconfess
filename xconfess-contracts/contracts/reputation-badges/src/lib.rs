@@ -1,6 +1,8 @@
 #![no_std]
 
-use soroban_sdk::{contract, contracterror, contractimpl, contracttype, Address, Env, String, Symbol, Vec};
+use soroban_sdk::{
+    contract, contracterror, contractimpl, contracttype, Address, Env, String, Symbol, Vec,
+};
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -143,11 +145,15 @@ impl ReputationBadges {
         current_admin.require_auth();
 
         new_admin.require_auth();
-        env.storage().persistent().set(&StorageKey::Admin, &new_admin);
+        env.storage()
+            .persistent()
+            .set(&StorageKey::Admin, &new_admin);
 
         let event_topic = Symbol::new(&env, "admin_transferred");
-        env.events()
-            .publish((event_topic, current_admin.clone()), (current_admin, new_admin.clone()));
+        env.events().publish(
+            (event_topic, current_admin.clone()),
+            (current_admin, new_admin.clone()),
+        );
 
         Ok(())
     }
@@ -169,9 +175,10 @@ impl ReputationBadges {
             criteria,
         };
 
-        env.storage()
-            .persistent()
-            .set(&StorageKey::BadgeTypeMetadata(badge_type.clone()), &metadata);
+        env.storage().persistent().set(
+            &StorageKey::BadgeTypeMetadata(badge_type.clone()),
+            &metadata,
+        );
 
         let event_topic = Symbol::new(&env, "badge_type_created");
         env.events()

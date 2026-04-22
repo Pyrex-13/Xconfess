@@ -11,17 +11,11 @@ import { getApiBaseUrl } from "@/app/lib/config";
 
 /**
  * Returns true only when running in a local development environment AND the
- * NEXT_PUBLIC_ADMIN_MOCK env var is explicitly set to "true".
- *
- * The localStorage "adminMock" toggle has been removed: it allowed any user
- * to grant themselves admin navigation by setting a key in the browser, which
- * creates an ambiguous privilege boundary even when backend guards are in
- * place. The env-var path is kept exclusively for development convenience
- * and is impossible to enable in production builds.
+ * shared dev auth bypass flag is explicitly enabled.
  */
-function isMockAdminEnabled(): boolean {
+function isDevBypassEnabled(): boolean {
   if (process.env.NODE_ENV !== "development") return false;
-  return process.env.NEXT_PUBLIC_ADMIN_MOCK === "true";
+  return process.env.NEXT_PUBLIC_DEV_BYPASS_AUTH === "true";
 }
 
 export default function AdminLayout({
@@ -53,7 +47,7 @@ export default function AdminLayout({
     // In development mock mode, skip real auth so local UI work is unblocked.
     // This path is compiled away in production builds (NODE_ENV check is
     // evaluated at build time by Next.js / webpack dead-code elimination).
-    if (isMockAdminEnabled()) return;
+    if (isDevBypassEnabled()) return;
 
     // Require a real authenticated admin session.
     const userStr = localStorage.getItem(USER_DATA_KEY);
@@ -74,7 +68,7 @@ export default function AdminLayout({
 
   useEffect(() => {
     // Real-time notifications for new reports (admins only)
-    if (isMockAdminEnabled()) return;
+    if (isDevBypassEnabled()) return;
     const token =
       typeof window !== "undefined"
         ? localStorage.getItem(AUTH_TOKEN_KEY)
@@ -172,9 +166,9 @@ export default function AdminLayout({
             <span className="font-semibold text-gray-900 dark:text-white">
               Admin
             </span>
-            {isMockAdminEnabled() && (
+            {isDevBypassEnabled() && (
               <span className="text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-200">
-                mock
+                dev
               </span>
             )}
             {newReportsCount > 0 && (
@@ -212,9 +206,9 @@ export default function AdminLayout({
                 <span className="text-lg font-bold text-gray-900 dark:text-white">
                   Admin Dashboard
                 </span>
-                {isMockAdminEnabled() && (
+                {isDevBypassEnabled() && (
                   <span className="text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-200">
-                    mock
+                    dev
                   </span>
                 )}
               </div>
@@ -282,9 +276,9 @@ export default function AdminLayout({
                 <span className="text-lg font-bold text-gray-900 dark:text-white">
                   Admin Dashboard
                 </span>
-                {isMockAdminEnabled() && (
+                {isDevBypassEnabled() && (
                   <span className="text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-200">
-                    mock
+                    dev
                   </span>
                 )}
               </div>

@@ -173,7 +173,8 @@ export class AiModerationService {
         requiresReview: false,
       };
     } catch (error) {
-      this.logger.error('OpenAI moderation failed:', error.message);
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error('OpenAI moderation failed:', message);
       return null;
     }
   }
@@ -249,7 +250,8 @@ export class AiModerationService {
         requiresReview: false,
       };
     } catch (error) {
-      this.logger.error('Perspective API moderation failed:', error.message);
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error('Perspective API moderation failed:', message);
       return null;
     }
   }

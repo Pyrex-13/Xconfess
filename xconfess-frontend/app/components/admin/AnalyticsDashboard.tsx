@@ -1,6 +1,7 @@
 'use client';
 
 import { Analytics } from '@/app/lib/api/admin';
+import { useGlobalToast } from '@/app/components/common/Toast';
 import {
   LineChart,
   Line,
@@ -25,6 +26,7 @@ interface AnalyticsDashboardProps {
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d'];
 
 export default function AnalyticsDashboard({ analytics }: AnalyticsDashboardProps) {
+  const toast = useGlobalToast();
   const { overview, reports, trends } = analytics;
 
   const reportsByStatusData = reports.byStatus.map((item) => ({
@@ -81,7 +83,16 @@ export default function AnalyticsDashboard({ analytics }: AnalyticsDashboardProp
         value: parseInt(item.count, 10),
       })),
     ];
-    exportToCSV(exportData, `analytics-${new Date().toISOString().split('T')[0]}.csv`);
+    const exported = exportToCSV(
+      exportData,
+      `analytics-${new Date().toISOString().split('T')[0]}.csv`,
+    );
+    if (!exported) {
+      toast.warning('No analytics data available to export.');
+      return;
+    }
+
+    toast.success('Analytics CSV exported.');
   };
 
   return (

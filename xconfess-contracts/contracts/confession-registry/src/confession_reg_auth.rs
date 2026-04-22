@@ -48,7 +48,7 @@ use crate::{ConfessionRegistry, ConfessionRegistryClient, ConfessionStatus};
 fn setup() -> (Env, ConfessionRegistryClient<'static>, Address, Address) {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register_contract(None, ConfessionRegistry);
+    let contract_id = env.register(ConfessionRegistry, ());
     let client = ConfessionRegistryClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);

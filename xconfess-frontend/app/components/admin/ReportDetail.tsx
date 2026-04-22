@@ -1,9 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { Report } from '@/app/lib/api/admin';
-import { adminApi } from '@/app/lib/api/admin';
+import { Report, adminApi } from '@/app/lib/api/admin';
 import { MODERATION_TEMPLATES } from '@/app/lib/utils/moderationTemplates';
+import { useGlobalToast } from '@/app/components/common/Toast';
+import { ConfirmDialog } from '@/app/components/admin/ConfirmDialog';
 
 interface ReportDetailProps {
   report: Report;
@@ -12,6 +13,8 @@ interface ReportDetailProps {
   onDismiss: (notes?: string) => void;
 }
 
+type PendingAction = 'resolve' | 'dismiss' | 'delete' | 'hide' | null;
+
 export default function ReportDetail({
   report,
   onBack,
@@ -19,51 +22,100 @@ export default function ReportDetail({
   onDismiss,
 }: ReportDetailProps) {
   const [resolutionNotes, setResolutionNotes] = useState('');
+  const [pendingAction, setPendingAction] = useState<PendingAction>(null);
+  const toast = useGlobalToast();
 
-  const handleResolve = () => {
-    if (confirm('Are you sure you want to resolve this report?')) {
-      onResolve(resolutionNotes || undefined);
-    }
-  };
-
-  const handleDismiss = () => {
-    if (confirm('Are you sure you want to dismiss this report?')) {
-      onDismiss(resolutionNotes || undefined);
-    }
-  };
-
-  const handleDeleteConfession = async () => {
-    if (confirm('Are you sure you want to delete this confession? This action cannot be undone.')) {
-      try {
-        await adminApi.deleteConfession(report.confessionId, 'Deleted via report resolution');
-        alert('Confession deleted successfully');
-        onBack();
-      } catch {
-        alert('Failed to delete confession');
+  const handleConfirmedAction = async () => {
+    try {
+      switch (pendingAction) {
+        case 'resolve':
+          onResolve(resolutionNotes || undefined);
+          break;
+        case 'dismiss':
+          onDismiss(resolutionNotes || undefined);
+          break;
+        case 'delete':
+          await adminApi.deleteConfession(
+            report.confessionId,
+            'Deleted via report resolution',
+          );
+          toast.success('Confession deleted successfully');
+          onBack();
+          break;
+        case 'hide':
+          await adminApi.hideConfession(
+            report.confessionId,
+            'Hidden via report resolution',
+          );
+          toast.success('Confession hidden successfully');
+          onBack();
+          break;
+        default:
+          break;
       }
+    } catch {
+      if (pendingAction === 'delete') {
+        toast.error('Failed to delete confession');
+      } else if (pendingAction === 'hide') {
+        toast.error('Failed to hide confession');
+      }
+    } finally {
+      setPendingAction(null);
     }
   };
 
-  const handleHideConfession = async () => {
-    if (confirm('Are you sure you want to hide this confession?')) {
-      try {
-        await adminApi.hideConfession(report.confessionId, 'Hidden via report resolution');
-        alert('Confession hidden successfully');
-        onBack();
-      } catch {
-        alert('Failed to hide confession');
-      }
-    }
-  };
+  const confirmTitle =
+    pendingAction === 'resolve'
+      ? 'Resolve report?'
+      : pendingAction === 'dismiss'
+        ? 'Dismiss report?'
+        : pendingAction === 'delete'
+          ? 'Delete confession?'
+          : 'Hide confession?';
+
+  const confirmDescription =
+    pendingAction === 'resolve'
+      ? 'This will mark the report as resolved and keep your moderation notes.'
+      : pendingAction === 'dismiss'
+        ? 'This will dismiss the report and keep your dismissal notes.'
+        : pendingAction === 'delete'
+          ? 'This action cannot be undone. The confession will be permanently deleted.'
+          : 'This will hide the confession from regular users while preserving it for admins.';
 
   return (
     <div className="space-y-6">
+      <ConfirmDialog
+        open={pendingAction !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingAction(null);
+        }}
+        title={confirmTitle}
+        description={confirmDescription}
+        confirmLabel={
+          pendingAction === 'resolve'
+            ? 'Resolve'
+            : pendingAction === 'dismiss'
+              ? 'Dismiss'
+              : pendingAction === 'delete'
+                ? 'Delete'
+                : 'Hide'
+        }
+        variant={
+          pendingAction === 'delete' || pendingAction === 'hide'
+            ? 'danger'
+            : 'default'
+        }
+        onConfirm={() => {
+          void handleConfirmedAction();
+        }}
+      />
+
       <div className="flex items-center justify-between">
         <button
           onClick={onBack}
           className="text-indigo-600 hover:text-indigo-900 dark:text-indigo-400"
         >
-          ← Back to Reports
+          Back to Reports
         </button>
       </div>
 
@@ -89,8 +141,8 @@ export default function ReportDetail({
                     report.status === 'pending'
                       ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-800 dark:text-yellow-100'
                       : report.status === 'resolved'
-                      ? 'bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-100'
-                      : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200'
+                        ? 'bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-100'
+                        : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200'
                   }`}
                 >
                   {report.status}
@@ -192,13 +244,13 @@ export default function ReportDetail({
 
             <div className="flex gap-4">
               <button
-                onClick={handleResolve}
+                onClick={() => setPendingAction('resolve')}
                 className="flex-1 bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700"
               >
                 Resolve Report
               </button>
               <button
-                onClick={handleDismiss}
+                onClick={() => setPendingAction('dismiss')}
                 className="flex-1 bg-gray-600 text-white px-4 py-2 rounded-md hover:bg-gray-700"
               >
                 Dismiss Report
@@ -211,13 +263,13 @@ export default function ReportDetail({
               </h4>
               <div className="flex gap-2">
                 <button
-                  onClick={handleDeleteConfession}
+                  onClick={() => setPendingAction('delete')}
                   className="bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700 text-sm"
                 >
                   Delete Confession
                 </button>
                 <button
-                  onClick={handleHideConfession}
+                  onClick={() => setPendingAction('hide')}
                   className="bg-yellow-600 text-white px-4 py-2 rounded-md hover:bg-yellow-700 text-sm"
                 >
                   Hide Confession

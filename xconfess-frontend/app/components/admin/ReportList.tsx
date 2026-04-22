@@ -4,6 +4,8 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { adminApi, Report } from "@/app/lib/api/admin";
 import ReportDetail from "./ReportDetail";
+import { ConfirmDialog } from "@/app/components/admin/ConfirmDialog";
+import { useGlobalToast } from "@/app/components/common/Toast";
 import { exportToCSV } from "@/app/lib/utils/csvExport";
 
 export default function ReportList() {
@@ -13,9 +15,11 @@ export default function ReportList() {
   const [startDate, setStartDate] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
   const [page, setPage] = useState(1);
+  const [bulkResolveOpen, setBulkResolveOpen] = useState(false);
   const limit = 20;
 
   const queryClient = useQueryClient();
+  const toast = useGlobalToast();
 
   const { data, isLoading } = useQuery({
     queryKey: [
@@ -65,6 +69,9 @@ export default function ReportList() {
         );
       }
     },
+    onSuccess: () => {
+      toast.success("Report resolved.");
+    },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["admin-reports"] });
       setSelectedReport(null);
@@ -98,6 +105,9 @@ export default function ReportList() {
           context.previousData,
         );
       }
+    },
+    onSuccess: () => {
+      toast.success("Report dismissed.");
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["admin-reports"] });
@@ -133,6 +143,9 @@ export default function ReportList() {
         );
       }
     },
+    onSuccess: () => {
+      toast.success("Selected reports resolved.");
+    },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["admin-reports"] });
     },
@@ -152,10 +165,7 @@ export default function ReportList() {
 
   const handleBulkResolve = () => {
     if (selectedIds.size === 0) return;
-    if (confirm(`Resolve ${selectedIds.size} selected reports?`)) {
-      bulkResolveMutation.mutate({ ids: Array.from(selectedIds) });
-      setSelectedIds(new Set());
-    }
+    setBulkResolveOpen(true);
   };
 
   if (isLoading) {
@@ -188,6 +198,21 @@ export default function ReportList() {
 
   return (
     <div className="space-y-4">
+      <ConfirmDialog
+        open={bulkResolveOpen}
+        onOpenChange={setBulkResolveOpen}
+        title="Resolve selected reports?"
+        description={`This will mark ${selectedIds.size} selected reports as resolved.`}
+        confirmLabel="Resolve"
+        variant="danger"
+        loading={bulkResolveMutation.isPending}
+        onConfirm={() => {
+          bulkResolveMutation.mutate({ ids: Array.from(selectedIds) });
+          setSelectedIds(new Set());
+          setBulkResolveOpen(false);
+        }}
+      />
+
       {/* Filters */}
       <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-4">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-5">
@@ -275,10 +300,16 @@ export default function ReportList() {
                     ? new Date(r.resolvedAt).toLocaleString()
                     : "",
                 }));
-                exportToCSV(
+                const exported = exportToCSV(
                   exportData,
                   `reports-${new Date().toISOString().split("T")[0]}.csv`,
                 );
+                if (!exported) {
+                  toast.warning("No reports available to export.");
+                  return;
+                }
+
+                toast.success("Reports CSV exported.");
               }}
               className="bg-gray-600 text-white px-4 py-2 rounded-md hover:bg-gray-700 text-sm"
             >

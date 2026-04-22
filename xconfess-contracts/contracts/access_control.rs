@@ -35,7 +35,7 @@
 //! | `admin_revoked`     | `{ address: Address }`        |
 //! | `ownership_xfer`    | `{ from: Address, to: Address }` |
 
-use soroban_sdk::{contracttype, symbol_short, Address, Env, Map};
+use soroban_sdk::{contractevent, contracttype, Address, Env, Map, String};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Storage keys
@@ -77,6 +77,36 @@ pub enum AccessError {
     CannotRevokeLastAdmin = 7,
     /// Cannot transfer ownership to same address (code 8).
     InvalidOwnershipTransfer = 8,
+}
+
+#[contractevent(topics = ["adm_grant"], data_format = "single-value")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct AdminGrantedEvent {
+    #[topic]
+    address: Address,
+}
+
+#[contractevent(topics = ["adm_revke"], data_format = "single-value")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct AdminRevokedEvent {
+    #[topic]
+    address: Address,
+}
+
+#[contractevent(topics = ["own_xfer"], data_format = "single-value")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct OwnershipTransferredEvent {
+    #[topic]
+    new_owner: Address,
+    previous_owner: Address,
+}
+
+#[contractevent(topics = ["gov_inv"], data_format = "vec")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct GovernanceInvariantEvent {
+    operation: String,
+    reason: String,
+    caller: Address,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -142,7 +172,7 @@ pub fn count_admins(env: &Env) -> u32 {
         .instance()
         .get(&AccessKey::Admins)
         .unwrap_or_else(|| Map::new(env));
-    admins.len() as u32
+    admins.len()
 }
 
 /// Returns the total number of authorized addresses (owner + admins).
@@ -209,10 +239,10 @@ pub fn internal_grant_admin(env: &Env, target: &Address) -> Result<(), AccessErr
     admins.set(target.clone(), ());
     env.storage().instance().set(&AccessKey::Admins, &admins);
 
-    env.events().publish(
-        (symbol_short!("adm_grant"), target.clone()),
-        target.clone(),
-    );
+    AdminGrantedEvent {
+        address: target.clone(),
+    }
+    .publish(env);
 
     Ok(())
 }
@@ -224,7 +254,7 @@ pub fn internal_grant_admin(env: &Env, target: &Address) -> Result<(), AccessErr
 /// * Panics with `AccessError::CannotDemoteOwner` if `target` is the owner
 ///   (the owner is always implicitly authorized; removing them from the admin
 ///   map would create misleading authorization state).
-/// * Panics with `AccessError::CannotRevokeLastAdmin` if revoking would leave 
+/// * Panics with `AccessError::CannotRevokeLastAdmin` if revoking would leave
 ///   the contract with zero authorized addresses.
 /// * Emits `admin_revoked` event.
 pub fn revoke_admin(env: &Env, caller: &Address, target: &Address) -> Result<(), AccessError> {
@@ -247,10 +277,12 @@ pub fn internal_revoke_admin(
 
     let current_admins = count_admins(env);
     if current_admins <= 1 {
-        env.events().publish(
-            (symbol_short!("gov_inv"),),
-            ("revoke_admin", "Cannot revoke last admin", caller.clone()),
-        );
+        GovernanceInvariantEvent {
+            operation: String::from_str(env, "revoke_admin"),
+            reason: String::from_str(env, "Cannot revoke last admin"),
+            caller: caller.clone(),
+        }
+        .publish(env);
         return Err(AccessError::CannotRevokeLastAdmin);
     }
 
@@ -263,10 +295,10 @@ pub fn internal_revoke_admin(
     admins.remove(target.clone());
     env.storage().instance().set(&AccessKey::Admins, &admins);
 
-    env.events().publish(
-        (symbol_short!("adm_revke"), target.clone()),
-        target.clone(),
-    );
+    AdminRevokedEvent {
+        address: target.clone(),
+    }
+    .publish(env);
 
     Ok(())
 }
@@ -289,10 +321,7 @@ pub fn transfer_ownership(
     internal_transfer_ownership(env, new_owner)
 }
 
-pub fn internal_transfer_ownership(
-    env: &Env,
-    new_owner: &Address,
-) -> Result<(), AccessError> {
+pub fn internal_transfer_ownership(env: &Env, new_owner: &Address) -> Result<(), AccessError> {
     let old_owner = get_owner(env)?;
 
     if old_owner == *new_owner {
@@ -301,10 +330,11 @@ pub fn internal_transfer_ownership(
 
     env.storage().instance().set(&AccessKey::Owner, new_owner);
 
-    env.events().publish(
-        (symbol_short!("own_xfer"), new_owner.clone()),
-        old_owner,
-    );
+    OwnershipTransferredEvent {
+        new_owner: new_owner.clone(),
+        previous_owner: old_owner,
+    }
+    .publish(env);
 
     Ok(())
 }

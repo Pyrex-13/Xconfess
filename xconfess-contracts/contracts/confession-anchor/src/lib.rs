@@ -4,8 +4,8 @@ mod errors;
 mod events;
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, Address, BytesN, Env,
-    String, Symbol, Vec,
+    contract, contracterror, contractevent, contractimpl, contracttype, symbol_short, Address,
+    BytesN, Env, String, Symbol, Vec,
 };
 
 #[path = "../../access_control.rs"]
@@ -61,6 +61,15 @@ pub struct ContractCapabilityInfo {
     pub error_registry_version: u32,
 }
 
+#[contractevent(topics = ["confession_anchor"], data_format = "vec")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConfessionAnchoredEvent {
+    #[topic]
+    pub hash: BytesN<32>,
+    pub timestamp: u64,
+    pub anchor_height: u32,
+}
+
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -112,10 +121,7 @@ fn get_confession_store(env: &Env) -> soroban_sdk::storage::Instance {
 fn get_count(env: &Env) -> u64 {
     let storage = env.storage().instance();
     let key = symbol_short!("count");
-    match storage.get(&key) {
-        Some(value) => value,
-        None => 0u64,
-    }
+    storage.get(&key).unwrap_or_default()
 }
 
 fn set_count(env: &Env, count: u64) {
@@ -150,8 +156,7 @@ impl ConfessionAnchor {
     /// - panics with error code 4 (ContractPaused) if contract is paused
     pub fn anchor_confession(env: Env, hash: BytesN<32>, timestamp: u64) -> Symbol {
         // Check if paused — use shared emergency pause module
-        emergency_pause::assert_not_paused(&env)
-            .unwrap_or_else(|err| panic!("{}", err as u32));
+        emergency_pause::assert_not_paused(&env).unwrap_or_else(|err| panic!("{}", err as u32));
 
         let storage = get_confession_store(&env);
 
@@ -176,9 +181,12 @@ impl ConfessionAnchor {
         // Emit ConfessionAnchored event:
         // topics: ("confession_anchor", hash)
         // data: (timestamp, anchor_height)
-        let event_topic = Symbol::new(&env, "confession_anchor");
-        env.events()
-            .publish((event_topic, hash.clone()), (timestamp, anchor_height));
+        ConfessionAnchoredEvent {
+            hash: hash.clone(),
+            timestamp,
+            anchor_height,
+        }
+        .publish(&env);
 
         symbol_short!("anchored")
     }
@@ -268,29 +276,17 @@ impl ConfessionAnchor {
     }
 
     /// Grant admin role to an address (owner-only).
-    pub fn grant_admin(
-        env: Env,
-        caller: Address,
-        target: Address,
-    ) -> Result<(), Error> {
+    pub fn grant_admin(env: Env, caller: Address, target: Address) -> Result<(), Error> {
         access_control::grant_admin(&env, &caller, &target).map_err(Into::into)
     }
 
     /// Revoke admin role from an address (owner-only).
-    pub fn revoke_admin(
-        env: Env,
-        caller: Address,
-        target: Address,
-    ) -> Result<(), Error> {
+    pub fn revoke_admin(env: Env, caller: Address, target: Address) -> Result<(), Error> {
         access_control::revoke_admin(&env, &caller, &target).map_err(Into::into)
     }
 
     /// Transfer ownership to a new owner (current owner-only).
-    pub fn transfer_owner(
-        env: Env,
-        caller: Address,
-        new_owner: Address,
-    ) -> Result<(), Error> {
+    pub fn transfer_owner(env: Env, caller: Address, new_owner: Address) -> Result<(), Error> {
         access_control::transfer_ownership(&env, &caller, &new_owner).map_err(Into::into)
     }
 
@@ -300,21 +296,13 @@ impl ConfessionAnchor {
 
     /// Pause the contract (owner-only). Blocks anchor_confession writes.
     /// Read operations (verify, count) remain available.
-    pub fn pause(
-        env: Env,
-        caller: Address,
-        reason: String,
-    ) -> Result<(), Error> {
+    pub fn pause(env: Env, caller: Address, reason: String) -> Result<(), Error> {
         access_control::require_owner(&env, &caller).map_err(Error::from)?;
         emergency_pause::pause(env, reason).map_err(Into::into)
     }
 
     /// Unpause the contract (owner-only).
-    pub fn unpause(
-        env: Env,
-        caller: Address,
-        reason: String,
-    ) -> Result<(), Error> {
+    pub fn unpause(env: Env, caller: Address, reason: String) -> Result<(), Error> {
         access_control::require_owner(&env, &caller).map_err(Error::from)?;
         emergency_pause::unpause(env, reason).map_err(Into::into)
     }
@@ -389,7 +377,7 @@ mod test {
     fn new_client() -> (Env, ConfessionAnchorClient<'static>) {
         let env = Env::default();
         env.mock_all_auths();
-        let contract_id = env.register_contract(None, ConfessionAnchor);
+        let contract_id = env.register(ConfessionAnchor, ());
         let client = ConfessionAnchorClient::new(&env, &contract_id);
         (env, client)
     }

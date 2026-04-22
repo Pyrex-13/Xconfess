@@ -30,6 +30,9 @@ interface AuthProviderProps {
 export function AuthProvider({ children }: AuthProviderProps) {
   const setStoreUser = useAuthStore((s) => s.setUser);
   const storeLogout = useAuthStore((s) => s.logout);
+  const isDevBypassEnabled =
+    process.env.NODE_ENV === "development" &&
+    process.env.NEXT_PUBLIC_DEV_BYPASS_AUTH === "true";
 
   const [state, setState] = useState<AuthState>({
     user: null,
@@ -45,6 +48,24 @@ export function AuthProvider({ children }: AuthProviderProps) {
   * Check if user is authenticated by validating token with backend
   */
   const checkAuth = useCallback(async (): Promise<void> => {
+    if (isDevBypassEnabled) {
+      const mockUser = {
+        id: "dev-user",
+        username: "dev",
+        email: "dev@example.com",
+        role: "admin",
+      };
+
+      setStoreUser(mockUser as never);
+      setState({
+        user: mockUser as never,
+        isAuthenticated: true,
+        isLoading: false,
+        error: null,
+      });
+      return;
+    }
+
     try {
       const user = await authApi.getCurrentUser();
       setStoreUser(user);
@@ -64,7 +85,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         error: null, // Don't show error for initial check
       });
     }
-  }, [setStoreUser]);
+  }, [isDevBypassEnabled, setStoreUser]);
 
   //   Check authentication status on mount
 

@@ -197,14 +197,14 @@ fn test_revoke_badge() {
 
     // Mint badge
     let badge_id = client.mint_badge(&user, &BadgeType::GenerousSoul);
-    assert_eq!(client.has_badge(&user, &BadgeType::GenerousSoul), true);
+    assert!(client.has_badge(&user, &BadgeType::GenerousSoul));
     assert_eq!(client.get_badge_count(&user), 1);
 
     // Revoke badge
     client.revoke_badge(&badge_id);
 
     // Verify
-    assert_eq!(client.has_badge(&user, &BadgeType::GenerousSoul), false);
+    assert!(!client.has_badge(&user, &BadgeType::GenerousSoul));
     assert_eq!(client.get_badge_count(&user), 0);
     assert!(client.get_badge(&badge_id).is_none());
 }
@@ -440,4 +440,3 @@ fn test_mint_and_award_can_coexist() {
     assert_eq!(award_id, 2);
     assert_eq!(client.get_badge_count(&user), 2);
 }
-

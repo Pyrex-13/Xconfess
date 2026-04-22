@@ -69,7 +69,6 @@ export class DataExportController {
     @Query('userId') userId: string,
     @Query('expires') expires: string,
     @Query('signature') signature: string,
-    @Res() res: Response,
     @Query('chunk') chunk?: string,
   ) {
     // 1. Check Expiration

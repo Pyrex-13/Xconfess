@@ -1,10 +1,10 @@
 use soroban_sdk::{Env, String};
 
 use crate::emergency_pause::{
-    storage::DataKey,
+    admin::require_admin,
     errors::PauseError,
     events::{emit_paused, emit_unpaused},
-    admin::require_admin,
+    storage::DataKey,
 };
 
 pub fn is_paused(env: &Env) -> bool {

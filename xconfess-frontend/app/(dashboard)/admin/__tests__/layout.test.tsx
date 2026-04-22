@@ -1,23 +1,21 @@
 /**
- * Regression tests for the admin layout mock-admin guard.
+ * Regression tests for the admin layout dev-bypass guard.
  *
  * Security requirement (issue #649):
- *   - The localStorage "adminMock" toggle must no longer grant admin access.
- *   - NEXT_PUBLIC_ADMIN_MOCK may only enable mock mode when NODE_ENV === "development".
- *   - In production-like builds (NODE_ENV !== "development"), mock mode is always false.
+ * - The localStorage "adminMock" toggle must no longer grant admin access.
+ * - NEXT_PUBLIC_DEV_BYPASS_AUTH may only bypass auth when NODE_ENV === "development".
+ * - In production-like builds (NODE_ENV !== "development"), bypass mode is always false.
  */
 
 import React from "react";
 import { render, waitFor } from "@testing-library/react";
 
-// ── Next.js navigation mocks ───────────────────────────────────────────────
 const mockReplace = jest.fn();
 jest.mock("next/navigation", () => ({
   useRouter: () => ({ replace: mockReplace }),
   usePathname: () => "/admin/dashboard",
 }));
 
-// ── React-query mock ───────────────────────────────────────────────────────
 jest.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({
     invalidateQueries: jest.fn(),
@@ -25,7 +23,6 @@ jest.mock("@tanstack/react-query", () => ({
   }),
 }));
 
-// ── Socket.io mock ─────────────────────────────────────────────────────────
 jest.mock("socket.io-client", () => ({
   io: () => ({
     on: jest.fn(),
@@ -33,7 +30,6 @@ jest.mock("socket.io-client", () => ({
   }),
 }));
 
-// ── Misc app mocks ─────────────────────────────────────────────────────────
 jest.mock("@/app/lib/api/constants", () => ({
   AUTH_TOKEN_KEY: "auth_token",
   USER_DATA_KEY: "user_data",
@@ -44,8 +40,6 @@ jest.mock("@/app/lib/hooks/useFocusTrap", () => ({
 jest.mock("@/app/lib/config", () => ({
   getApiBaseUrl: () => "http://localhost:5000",
 }));
-
-// ── Helpers ────────────────────────────────────────────────────────────────
 
 function setLocalStorage(key: string, value: string) {
   (window.localStorage.getItem as jest.Mock).mockImplementation((k: string) =>
@@ -58,36 +52,29 @@ function clearLocalStorage() {
 }
 
 async function renderLayout() {
-  // Dynamic import so NODE_ENV / env var changes in individual tests are
-  // picked up fresh via module registry manipulation where needed.
   const { default: AdminLayout } = await import("../layout");
   return render(<AdminLayout>content</AdminLayout>);
 }
 
-// ── Tests ──────────────────────────────────────────────────────────────────
-
 beforeEach(() => {
   jest.clearAllMocks();
   clearLocalStorage();
-  delete process.env.NEXT_PUBLIC_ADMIN_MOCK;
+  delete process.env.NEXT_PUBLIC_DEV_BYPASS_AUTH;
 });
 
-describe("isMockAdminEnabled — production guard", () => {
-  it("is always false when NODE_ENV is not 'development'", () => {
-    // NODE_ENV is 'test' in Jest — mock mode must be inactive.
+describe("isDevBypassEnabled - production guard", () => {
+  it("is always false when NODE_ENV is not development", async () => {
     expect(process.env.NODE_ENV).not.toBe("development");
-    // Setting the env var must have no effect outside of development.
-    process.env.NEXT_PUBLIC_ADMIN_MOCK = "true";
+    process.env.NEXT_PUBLIC_DEV_BYPASS_AUTH = "true";
 
-    // The function is private; we verify its effect: the layout should still
-    // enforce authentication (redirect when no user is present).
-    // If mock mode were active it would skip the redirect.
-    // Covered by the redirect tests below.
+    await renderLayout();
+
+    await waitFor(() => {
+      expect(mockReplace).toHaveBeenCalledWith("/login");
+    });
   });
 
   it("localStorage 'adminMock' key is never checked", async () => {
-    // This is the core regression: the old code read localStorage("adminMock").
-    // Set it to "true" and confirm the layout still enforces auth.
     (window.localStorage.getItem as jest.Mock).mockImplementation((k: string) =>
       k === "adminMock" ? "true" : null,
     );
@@ -99,9 +86,8 @@ describe("isMockAdminEnabled — production guard", () => {
     });
   });
 
-  it("NEXT_PUBLIC_ADMIN_MOCK='true' without development NODE_ENV does not bypass auth", async () => {
-    process.env.NEXT_PUBLIC_ADMIN_MOCK = "true";
-    // NODE_ENV is 'test', not 'development', so mock mode stays off.
+  it("NEXT_PUBLIC_DEV_BYPASS_AUTH='true' without development NODE_ENV does not bypass auth", async () => {
+    process.env.NEXT_PUBLIC_DEV_BYPASS_AUTH = "true";
     clearLocalStorage();
 
     await renderLayout();
@@ -112,7 +98,7 @@ describe("isMockAdminEnabled — production guard", () => {
   });
 });
 
-describe("Admin layout — authentication redirect behaviour", () => {
+describe("Admin layout - authentication redirect behaviour", () => {
   it("redirects to /login when no user data is present in localStorage", async () => {
     clearLocalStorage();
 
@@ -145,7 +131,6 @@ describe("Admin layout — authentication redirect behaviour", () => {
 
     await renderLayout();
 
-    // Allow any pending effects to settle
     await waitFor(() => expect(mockReplace).not.toHaveBeenCalled());
   });
 
@@ -164,7 +149,6 @@ describe("Admin layout — authentication redirect behaviour", () => {
 
     await renderLayout();
 
-    // localStorage.setItem must never be called: no auto-seeding of admin tokens.
     expect(window.localStorage.setItem).not.toHaveBeenCalled();
   });
 });

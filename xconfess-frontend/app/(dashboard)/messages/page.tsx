@@ -11,6 +11,21 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Send, User as UserIcon, MessageSquare } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
+import { useGlobalToast } from '@/app/components/common/Toast';
+
+const DEV_BYPASS_AUTH_ENABLED =
+  process.env.NODE_ENV === 'development' &&
+  process.env.NEXT_PUBLIC_DEV_BYPASS_AUTH === 'true';
+
+function isExpectedDevOfflineError(error: unknown): boolean {
+  return (
+    DEV_BYPASS_AUTH_ENABLED &&
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    error.code === 'ERR_NETWORK'
+  );
+}
 
 interface Thread {
   confessionId: string;
@@ -41,6 +56,7 @@ export default function MessagesPage() {
   const [isSending, setIsSending] = useState(false);
   const [threadsError, setThreadsError] = useState<string | null>(null);
   const [messagesError, setMessagesError] = useState<string | null>(null);
+  const toast = useGlobalToast();
 
   const fetchThreads = useCallback(async () => {
     try {
@@ -49,8 +65,13 @@ export default function MessagesPage() {
       const response = await apiClient.get('/messages/threads');
       setThreads(response.data || []);
     } catch (error) {
-      console.error('Failed to fetch threads:', error);
-      setThreadsError('Unable to load conversations. Check your connection and try again.');
+      if (isExpectedDevOfflineError(error)) {
+        console.debug('Skipping expected local messages error while backend is offline.');
+        setThreadsError('Messages will appear once the local backend is running.');
+      } else {
+        console.error('Failed to fetch threads:', error);
+        setThreadsError('Unable to load conversations. Check your connection and try again.');
+      }
     } finally {
       setIsLoadingThreads(false);
     }
@@ -63,8 +84,13 @@ export default function MessagesPage() {
       const response = await apiClient.get(`/messages?confession_id=${confessionId}&sender_id=${senderId}`);
       setMessages(response.data?.messages || []);
     } catch (error) {
-      console.error('Failed to fetch messages:', error);
-      setMessagesError('Unable to load messages for this conversation.');
+      if (isExpectedDevOfflineError(error)) {
+        console.debug('Skipping expected local thread error while backend is offline.');
+        setMessagesError('Messages will appear once the local backend is running.');
+      } else {
+        console.error('Failed to fetch messages:', error);
+        setMessagesError('Unable to load messages for this conversation.');
+      }
     } finally {
       setIsLoadingMessages(false);
     }
@@ -94,7 +120,7 @@ export default function MessagesPage() {
             reply: newMessage.trim(),
           });
         } else {
-          alert("Please wait for the sender to message you again.");
+          toast.warning("Please wait for the sender to message you again.");
           return;
         }
       } else {
@@ -109,6 +135,7 @@ export default function MessagesPage() {
       fetchMessages(selectedThread.confessionId, selectedThread.senderId);
     } catch (error) {
       console.error('Failed to send message:', error);
+      toast.error('Unable to send message right now.');
     } finally {
       setIsSending(false);
     }

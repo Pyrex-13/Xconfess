@@ -1,7 +1,6 @@
-export function exportToCSV(data: any[], filename: string) {
+export function exportToCSV(data: any[], filename: string): boolean {
   if (data.length === 0) {
-    alert('No data to export');
-    return;
+    return false;
   }
 
   const headers = Object.keys(data[0]);
@@ -28,4 +27,5 @@ export function exportToCSV(data: any[], filename: string) {
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
+  return true;
 }
