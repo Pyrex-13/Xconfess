@@ -20,37 +20,49 @@ on:
           - "true"
           - "false"
 
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-${{ github.event.inputs.environment }}
+  cancel-in-progress: false
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
   validate:
     name: Validate secrets and inputs
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
+    environment: ${{ github.event.inputs.environment }}
     steps:
       - name: Check required deployment secrets
         run: |
           missing=()
-          [[ -z "${{ secrets.DEPLOY_HOST }}" ]]        && missing+=("DEPLOY_HOST")
-          [[ -z "${{ secrets.DEPLOY_USER }}" ]]        && missing+=("DEPLOY_USER")
-          [[ -z "${{ secrets.DEPLOY_SSH_KEY }}" ]]     && missing+=("DEPLOY_SSH_KEY")
-          [[ -z "${{ secrets.BACKEND_ENV_FILE }}" ]]   && missing+=("BACKEND_ENV_FILE")
+          [[ -z "${{ secrets.DEPLOY_HOST }}" ]] && missing+=("DEPLOY_HOST")
+          [[ -z "${{ secrets.DEPLOY_USER }}" ]] && missing+=("DEPLOY_USER")
+          [[ -z "${{ secrets.DEPLOY_SSH_KEY }}" ]] && missing+=("DEPLOY_SSH_KEY")
+          [[ -z "${{ secrets.BACKEND_ENV_FILE }}" ]] && missing+=("BACKEND_ENV_FILE")
           [[ -z "${{ secrets.NEXT_PUBLIC_API_URL }}" ]] && missing+=("NEXT_PUBLIC_API_URL")
 
           if [[ ${#missing[@]} -gt 0 ]]; then
-            echo "::error::Missing required secrets for '${{ inputs.environment }}': ${missing[*]}"
-            echo "Configure these secrets in Settings → Environments → ${{ inputs.environment }} before running the CD pipeline."
+            echo "::error::Missing required secrets for '${{ github.event.inputs.environment }}': ${missing[*]}"
+            echo "Configure these secrets in Settings -> Environments -> ${{ github.event.inputs.environment }} before running the CD pipeline."
             exit 1
           fi
-          echo "All required secrets present. Proceeding with '${{ inputs.environment }}' deployment."
+
+          echo "All required secrets are present. Proceeding with '${{ github.event.inputs.environment }}' deployment."
 
   build:
     name: Build artifacts
     needs: validate
-    if: inputs.run_build == 'true'
+    if: github.event.inputs.run_build == 'true'
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
+    environment: ${{ github.event.inputs.environment }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -60,6 +72,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -69,6 +82,7 @@ jobs:
 
       - name: Build frontend
         env:
+          BACKEND_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}
           NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}
         run: npm run build --workspace=xconfess-frontend
 
@@ -87,14 +101,13 @@ jobs:
           retention-days: 7
 
   deploy:
-    name: Deploy to ${{ inputs.environment }}
+    name: Deploy to ${{ github.event.inputs.environment }}
     needs: [validate, build]
-    # Run after validate even if build was skipped (run_build == false)
     if: always() && needs.validate.result == 'success' && (needs.build.result == 'success' || needs.build.result == 'skipped')
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
+    environment: ${{ github.event.inputs.environment }}
     concurrency:
-      group: deploy-${{ inputs.environment }}
+      group: deploy-${{ github.event.inputs.environment }}
       cancel-in-progress: false
 
     steps:
@@ -112,14 +125,14 @@ jobs:
           ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
 
       - name: Download backend artifact
-        if: inputs.run_build == 'true'
+        if: github.event.inputs.run_build == 'true'
         uses: actions/download-artifact@v4
         with:
           name: xconfess-backend-dist-${{ github.run_id }}
           path: xconfess-backend/dist
 
       - name: Download frontend artifact
-        if: inputs.run_build == 'true'
+        if: github.event.inputs.run_build == 'true'
         uses: actions/download-artifact@v4
         with:
           name: xconfess-frontend-build-${{ github.run_id }}
@@ -127,7 +140,16 @@ jobs:
 
       - name: Write backend environment file
         run: |
-          echo "${{ secrets.BACKEND_ENV_FILE }}" > xconfess-backend/.env.deploy
+          cat > xconfess-backend/.env.deploy <<EOF
+${{ secrets.BACKEND_ENV_FILE }}
+EOF
+
+      - name: Write frontend environment file
+        run: |
+          cat > xconfess-frontend/.env.production <<EOF
+BACKEND_API_URL=${{ secrets.NEXT_PUBLIC_API_URL }}
+NEXT_PUBLIC_API_URL=${{ secrets.NEXT_PUBLIC_API_URL }}
+EOF
 
       - name: Sync backend to server
         run: |
@@ -146,29 +168,25 @@ jobs:
             "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:~/xconfess/frontend/"
 
       - name: Install dependencies and restart services on server
-        env:
-          ENV: ${{ inputs.environment }}
         run: |
-          ssh "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" bash -s << 'REMOTE'
+          ssh "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" bash -s <<'REMOTE'
             set -euo pipefail
 
-            # Backend
             cd ~/xconfess/backend
             cp .env.deploy .env
             npm ci --omit=dev
             if command -v pm2 &>/dev/null; then
               pm2 reload xconfess-backend --update-env || pm2 start dist/main.js --name xconfess-backend
             else
-              echo "::warning::pm2 not found — restart backend manually."
+              echo "::warning::pm2 not found - restart backend manually."
             fi
 
-            # Frontend
             cd ~/xconfess/frontend
             npm ci --omit=dev
             if command -v pm2 &>/dev/null; then
               pm2 reload xconfess-frontend --update-env || pm2 start npm --name xconfess-frontend -- start
             else
-              echo "::warning::pm2 not found — restart frontend manually."
+              echo "::warning::pm2 not found - restart frontend manually."
             fi
           REMOTE
 
@@ -182,7 +200,7 @@ jobs:
               echo "Backend is healthy."
               exit 0
             fi
-            echo "Attempt $i/12 — not ready yet, waiting 5s..."
+            echo "Attempt $i/12 - not ready yet, waiting 5s..."
             sleep 5
           done
           echo "::error::Backend health check failed after 60 s. Check server logs and initiate rollback if needed."
@@ -191,17 +209,18 @@ jobs:
       - name: Record deployment summary
         if: always()
         run: |
-          echo "## Deployment Summary" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Field          | Value |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|----------------|-------|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Environment    | \`${{ inputs.environment }}\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Triggered by   | @${{ github.actor }} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Commit         | \`${{ github.sha }}\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Run ID         | ${{ github.run_id }} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Artifacts built | ${{ inputs.run_build }} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "### Rollback" >> "$GITHUB_STEP_SUMMARY"
-          echo "To roll back, re-run this workflow against the previous commit SHA" >> "$GITHUB_STEP_SUMMARY"
-          echo "or SSH to the host and restore the previous \`dist/\` and \`.next/\` directories." >> "$GITHUB_STEP_SUMMARY"
-          echo "Backend artifacts are retained for 7 days under run IDs on the Actions tab." >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "## Deployment Summary"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Environment | \`${{ github.event.inputs.environment }}\` |"
+            echo "| Triggered by | @${{ github.actor }} |"
+            echo "| Commit | \`${{ github.sha }}\` |"
+            echo "| Run ID | ${{ github.run_id }} |"
+            echo "| Artifacts built | ${{ github.event.inputs.run_build }} |"
+            echo ""
+            echo "### Rollback"
+            echo "Re-run this workflow against the previous commit SHA to roll back, or SSH to the host and restore the previous \`dist/\` and \`.next/\` directories."
+            echo "Backend artifacts are retained for 7 days under Actions run IDs."
+          } >> "$GITHUB_STEP_SUMMARY"
