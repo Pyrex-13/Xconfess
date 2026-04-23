@@ -3,7 +3,9 @@
 #[path = "confession_reg_auth.rs"]
 mod confession_reg_auth;
 
-use soroban_sdk::{contract, contractevent, contractimpl, contracttype, Address, BytesN, Env, Vec};
+use soroban_sdk::{
+    contract, contracterror, contractevent, contractimpl, contracttype, Address, BytesN, Env, Vec,
+};
 
 #[path = "../../access_control.rs"]
 mod access_control;
@@ -88,6 +90,34 @@ pub enum DataKey {
     AuthorConfessions(Address),
     /// Contract admin address.
     Admin,
+    /// Per-caller sequencing nonce for replay protection.
+    CallerNonce(Address),
+}
+
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum ReplayError {
+    InvalidNonce = 1,
+}
+
+fn expected_nonce(env: &Env, caller: &Address) -> u64 {
+    env.storage()
+        .instance()
+        .get(&DataKey::CallerNonce(caller.clone()))
+        .unwrap_or(1u64)
+}
+
+fn consume_nonce(env: &Env, caller: &Address, nonce: u64) -> Result<(), ReplayError> {
+    let expected = expected_nonce(env, caller);
+    if nonce != expected {
+        return Err(ReplayError::InvalidNonce);
+    }
+
+    env.storage()
+        .instance()
+        .set(&DataKey::CallerNonce(caller.clone()), &(expected + 1));
+    Ok(())
 }
 
 // ─── Contract ───
@@ -258,6 +288,23 @@ impl ConfessionRegistry {
         next_id - 1
     }
 
+    /// Return the next valid nonce for a caller in sequenced mutation methods.
+    pub fn get_expected_nonce(env: Env, caller: Address) -> u64 {
+        expected_nonce(&env, &caller)
+    }
+
+    /// Replay-protected create_confession variant.
+    pub fn create_confession_seq(
+        env: Env,
+        author: Address,
+        content_hash: BytesN<32>,
+        timestamp: u64,
+        nonce: u64,
+    ) -> Result<u64, ReplayError> {
+        consume_nonce(&env, &author, nonce)?;
+        Ok(Self::create_confession(env, author, content_hash, timestamp))
+    }
+
     // ─── Update Status ───
 
     /// Update the status of a confession.
@@ -316,6 +363,20 @@ impl ConfessionRegistry {
         .publish(&env);
     }
 
+    /// Replay-protected update_status variant.
+    pub fn update_status_seq(
+        env: Env,
+        caller: Address,
+        id: u64,
+        new_status: ConfessionStatus,
+        timestamp: u64,
+        nonce: u64,
+    ) -> Result<(), ReplayError> {
+        consume_nonce(&env, &caller, nonce)?;
+        Self::update_status(env, caller, id, new_status, timestamp);
+        Ok(())
+    }
+
     // ─── Delete ───
 
     /// Soft-delete a confession (set status to Deleted).
@@ -363,6 +424,19 @@ impl ConfessionRegistry {
             timestamp,
         }
         .publish(&env);
+    }
+
+    /// Replay-protected delete_confession variant.
+    pub fn delete_confession_seq(
+        env: Env,
+        caller: Address,
+        id: u64,
+        timestamp: u64,
+        nonce: u64,
+    ) -> Result<(), ReplayError> {
+        consume_nonce(&env, &caller, nonce)?;
+        Self::delete_confession(env, caller, id, timestamp);
+        Ok(())
     }
 }
 
