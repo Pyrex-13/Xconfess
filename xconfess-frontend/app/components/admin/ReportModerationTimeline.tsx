@@ -143,7 +143,7 @@ export function ReportModerationTimeline({
         {!isLoading && !isError && entries.length > 0 && (
           <ol className="space-y-0">
             {entries.map((e, idx) => (
-              <li key={e.id} className="flex gap-3">
+              <li key={e.id} className="flex gap-3 pb-6 last:pb-0">
                 <div
                   className="flex w-4 shrink-0 flex-col items-center pt-1"
                   aria-hidden
@@ -153,7 +153,7 @@ export function ReportModerationTimeline({
                     <span className="mt-0.5 w-px flex-1 min-h-[1.25rem] bg-gray-200 dark:bg-gray-600" />
                   ) : null}
                 </div>
-                <div className="min-w-0 flex-1 pb-6 last:pb-0">
+                <div className="min-w-0 flex-1">
                   <time
                     className="block text-xs font-medium text-gray-500 dark:text-gray-400"
                     dateTime={e.at}
