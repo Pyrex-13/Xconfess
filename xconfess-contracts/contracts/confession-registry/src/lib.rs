@@ -16,7 +16,7 @@ mod emergency_pause;
 #[path = "../../error.rs"]
 mod error;
 #[path = "../../events.rs"]
-mod events;
+pub mod events;
 #[path = "../../governance/mod.rs"]
 mod governance;
 // mod confession_reg_auth;

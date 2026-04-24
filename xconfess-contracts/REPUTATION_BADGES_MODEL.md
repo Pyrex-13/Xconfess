@@ -86,6 +86,9 @@ The ReputationBadges contract manages user reputation scores and achievement bad
   - `get_badge_count(owner)` - Returns count of badges owned
   - `get_badge(badge_id)` - Returns badge by ID
   - `get_total_badges()` - Returns total badges minted
+  - `get_badge_type_metadata(badge_type)` - Returns display metadata (`BadgeTypeMetadata`) for a badge type, or `None` if not yet defined
+  - `has_badge_type_metadata(badge_type)` - Returns `true` if an admin has defined metadata for the badge type
+  - `get_user_badge_summary(user)` - Returns `(Vec<u64>, i128)` — badge IDs and reputation score in one call for efficient off-chain queries
 
 ## Badge Types
 

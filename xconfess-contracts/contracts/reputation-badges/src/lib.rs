@@ -679,6 +679,44 @@ impl ReputationBadges {
         Self::get_badge_count_internal(&env)
     }
 
+    /// Get metadata for a badge type.
+    ///
+    /// Returns the display name, description, and earning criteria for the
+    /// requested badge type, or `None` if an admin has not yet defined
+    /// metadata via `create_badge`.  Off-chain consumers should call this
+    /// instead of reading storage keys directly.
+    pub fn get_badge_type_metadata(env: Env, badge_type: BadgeType) -> Option<BadgeTypeMetadata> {
+        env.storage()
+            .persistent()
+            .get(&StorageKey::BadgeTypeMetadata(badge_type))
+    }
+
+    /// Check whether metadata has been defined for a badge type.
+    ///
+    /// Useful for consumers that want to guard against displaying badges
+    /// whose metadata has not yet been set up by an admin.
+    pub fn has_badge_type_metadata(env: Env, badge_type: BadgeType) -> bool {
+        env.storage()
+            .persistent()
+            .has(&StorageKey::BadgeTypeMetadata(badge_type))
+    }
+
+    /// Get a summary of a user's current badge state in a single call.
+    ///
+    /// Returns `(badge_ids, reputation_score)` so that off-chain consumers
+    /// (backend indexers, frontend queries) can fetch the complete badge
+    /// picture without issuing multiple separate contract calls.
+    pub fn get_user_badge_summary(env: Env, user: Address) -> (Vec<u64>, i128) {
+        let user_badges_key = StorageKey::UserBadges(user.clone());
+        let badge_ids: Vec<u64> = env
+            .storage()
+            .persistent()
+            .get(&user_badges_key)
+            .unwrap_or(Vec::new(&env));
+        let reputation = Self::get_user_reputation_internal(&env, &user);
+        (badge_ids, reputation)
+    }
+
     /// Revoke a badge
     pub fn revoke_badge(env: Env, badge_id: u64) -> Result<(), Error> {
         // Get the badge
