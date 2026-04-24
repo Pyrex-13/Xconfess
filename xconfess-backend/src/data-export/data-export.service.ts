@@ -226,7 +226,13 @@ export class DataExportService {
   /**
    * Validates that the supplied token matches the stored one-time nonce and,
    * if so, atomically consumes it to prevent replay.
-   * Returns false if the token is missing, expired, or already used.
+   *
+   * Issue #789 — token expiry rules:
+   *   1. Token must match the stored nonce (null = already consumed or never issued).
+   *   2. Token must not have been used before (`downloadedAt` must be null).
+   *   3. The export must still be within its retention window (24 h after `createdAt`).
+   *
+   * Returns false when any condition fails; callers should treat false as 403/410.
    */
   async validateAndConsumeToken(
     requestId: string,
@@ -235,11 +241,53 @@ export class DataExportService {
   ): Promise<boolean> {
     const record = await this.exportRepository.findOne({
       where: { id: requestId, userId },
-      select: ['downloadToken'] as any,
+      select: ['downloadToken', 'downloadedAt', 'createdAt', 'status'] as any,
     });
+
+    // Token missing, already consumed, or mismatch.
     if (!record || record.downloadToken !== token) return false;
+
+    // Terminal-use guard: token was already used (downloadedAt is set).
+    if (record.downloadedAt !== null) return false;
+
+    // Retention-window guard: export has exceeded its TTL.
+    if (!this.isFileAvailable(record as Pick<ExportRequest, 'status' | 'createdAt'>)) {
+      // Mark the token as expired so cleanup jobs can tell it apart from unused tokens.
+      await this.exportRepository.update(requestId, {
+        downloadToken: null,
+        expiredAt: new Date(),
+      });
+      return false;
+    }
+
     await this.invalidateDownloadToken(requestId);
     return true;
+  }
+
+  /**
+   * Expire all download tokens whose retention window has elapsed without being
+   * consumed.  Called by the cleanup scheduler (data-export-cleanup.ts).
+   *
+   * Issue #789 — ensures tokens cannot be reused after the configured TTL even
+   * if the owner never triggered a download.
+   */
+  async expireStaleDownloadTokens(): Promise<number> {
+    const ttlMs = this.configService.get<number>(
+      'DATA_EXPORT_TTL_MS',
+      24 * 60 * 60 * 1000,
+    );
+    const cutoff = new Date(Date.now() - ttlMs);
+
+    const result = await this.exportRepository
+      .createQueryBuilder()
+      .update(ExportRequest)
+      .set({ downloadToken: null, expiredAt: () => 'NOW()' })
+      .where('downloadToken IS NOT NULL')
+      .andWhere('downloadedAt IS NULL')
+      .andWhere('createdAt < :cutoff', { cutoff })
+      .execute();
+
+    return result.affected ?? 0;
   }
 
   async getExportFile(requestId: string, userId: string) {

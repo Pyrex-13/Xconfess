@@ -120,7 +120,13 @@ const ToastItem: React.FC<ToastProps> = ({ toast, onRemove }) => {
     >
       <div className={`flex-shrink-0 ${getTextColor()}`}>{getIcon()}</div>
       <div className={`flex-grow ${getTextColor()} text-sm font-medium`}>
-        {toast.message}
+        <span>{toast.message}</span>
+        {/* Issue #801 — surface requestId on failure toasts for support correlation */}
+        {toast.requestId && (toast.type === 'error' || toast.type === 'warning') && (
+          <p className="mt-1 font-mono text-[10px] opacity-60 select-all">
+            ID: {toast.requestId}
+          </p>
+        )}
       </div>
       {toast.action && (
         <button
