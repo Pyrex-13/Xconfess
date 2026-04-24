@@ -1,6 +1,4 @@
-import { renderHook } from "@testing-library/react";
-import { useWalletCTAState } from "@/lib/hooks/useWalletCTAState";
-import { useWallet } from "@/lib/hooks/useWallet";
+import { getWalletCTAState } from "@/lib/hooks/useWalletCTAState";
 import {
   walletNotInstalled,
   disconnectedWallet,
@@ -10,17 +8,9 @@ import {
   connectedNotReadyWallet,
 } from "@/tests/mocks/wallet-fixtures";
 
-jest.mock("@/lib/hooks/useWallet", () => ({ useWallet: jest.fn() }));
-
-const mockUseWallet = useWallet as jest.MockedFunction<typeof useWallet>;
-
-describe("useWalletCTAState", () => {
-  afterEach(() => jest.resetAllMocks());
-
+describe("getWalletCTAState", () => {
   it("returns loading state", () => {
-    mockUseWallet.mockReturnValue(loadingWallet());
-    const { result } = renderHook(() => useWalletCTAState());
-    expect(result.current).toEqual({
+    expect(getWalletCTAState(loadingWallet())).toEqual({
       status: "loading",
       disabled: true,
       guidance: null,
@@ -28,9 +18,7 @@ describe("useWalletCTAState", () => {
   });
 
   it("returns not-installed state", () => {
-    mockUseWallet.mockReturnValue(walletNotInstalled());
-    const { result } = renderHook(() => useWalletCTAState());
-    expect(result.current).toEqual({
+    expect(getWalletCTAState(walletNotInstalled())).toEqual({
       status: "not-installed",
       disabled: true,
       guidance: "Install Freighter wallet to continue.",
@@ -38,9 +26,7 @@ describe("useWalletCTAState", () => {
   });
 
   it("returns not-connected state", () => {
-    mockUseWallet.mockReturnValue(disconnectedWallet());
-    const { result } = renderHook(() => useWalletCTAState());
-    expect(result.current).toEqual({
+    expect(getWalletCTAState(disconnectedWallet())).toEqual({
       status: "not-connected",
       disabled: false,
       guidance: null,
@@ -48,9 +34,7 @@ describe("useWalletCTAState", () => {
   });
 
   it("returns not-ready state for wrong network", () => {
-    mockUseWallet.mockReturnValue(wrongNetworkWallet());
-    const { result } = renderHook(() => useWalletCTAState());
-    expect(result.current).toEqual({
+    expect(getWalletCTAState(wrongNetworkWallet())).toEqual({
       status: "not-ready",
       disabled: true,
       guidance: "Wrong network. Please switch to TESTNET_SOROBAN",
@@ -58,9 +42,7 @@ describe("useWalletCTAState", () => {
   });
 
   it("returns not-ready state for connected but not ready wallet", () => {
-    mockUseWallet.mockReturnValue(connectedNotReadyWallet());
-    const { result } = renderHook(() => useWalletCTAState());
-    expect(result.current).toEqual({
+    expect(getWalletCTAState(connectedNotReadyWallet())).toEqual({
       status: "not-ready",
       disabled: true,
       guidance: "Wallet not ready for transactions",
@@ -68,9 +50,7 @@ describe("useWalletCTAState", () => {
   });
 
   it("returns ready state", () => {
-    mockUseWallet.mockReturnValue(connectedWallet());
-    const { result } = renderHook(() => useWalletCTAState());
-    expect(result.current).toEqual({
+    expect(getWalletCTAState(connectedWallet())).toEqual({
       status: "ready",
       disabled: false,
       guidance: null,
@@ -78,11 +58,9 @@ describe("useWalletCTAState", () => {
   });
 
   it("respects extraDisabled when ready", () => {
-    mockUseWallet.mockReturnValue(connectedWallet());
-    const { result } = renderHook(() =>
-      useWalletCTAState({ extraDisabled: true }),
-    );
-    expect(result.current).toEqual({
+    expect(
+      getWalletCTAState(connectedWallet(), { extraDisabled: true }),
+    ).toEqual({
       status: "ready",
       disabled: true,
       guidance: null,
@@ -90,10 +68,8 @@ describe("useWalletCTAState", () => {
   });
 
   it("ignores extraDisabled when not ready", () => {
-    mockUseWallet.mockReturnValue(wrongNetworkWallet());
-    const { result } = renderHook(() =>
-      useWalletCTAState({ extraDisabled: false }),
-    );
-    expect(result.current.disabled).toBe(true);
+    expect(
+      getWalletCTAState(wrongNetworkWallet(), { extraDisabled: false }).disabled,
+    ).toBe(true);
   });
 });

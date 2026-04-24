@@ -1,4 +1,4 @@
-import { useWallet } from "@/lib/hooks/useWallet";
+import type { UseWalletReturn } from "@/lib/hooks/useWallet";
 
 export type WalletCTAStatus =
   | "not-installed"
@@ -13,16 +13,20 @@ export interface WalletCTAState {
   guidance: string | null;
 }
 
-export function useWalletCTAState(opts?: {
-  extraDisabled?: boolean;
-}): WalletCTAState {
-  const { isFreighterInstalled, isConnected, isReady, readinessError, isLoading } = useWallet();
+export type WalletCTAInput = Pick<
+  UseWalletReturn,
+  "isFreighterInstalled" | "isConnected" | "isReady" | "readinessError" | "isLoading"
+>;
 
-  if (isLoading) {
+export function getWalletCTAState(
+  wallet: WalletCTAInput,
+  opts?: { extraDisabled?: boolean },
+): WalletCTAState {
+  if (wallet.isLoading) {
     return { status: "loading", disabled: true, guidance: null };
   }
 
-  if (!isFreighterInstalled) {
+  if (!wallet.isFreighterInstalled) {
     return {
       status: "not-installed",
       disabled: true,
@@ -30,15 +34,15 @@ export function useWalletCTAState(opts?: {
     };
   }
 
-  if (!isConnected) {
+  if (!wallet.isConnected) {
     return { status: "not-connected", disabled: false, guidance: null };
   }
 
-  if (!isReady) {
+  if (!wallet.isReady) {
     return {
       status: "not-ready",
       disabled: true,
-      guidance: readinessError || "Wallet not ready.",
+      guidance: wallet.readinessError || "Wallet not ready.",
     };
   }
 

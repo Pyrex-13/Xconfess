@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useStellarWallet } from "@/app/lib/hooks/useStellarWallet";
-import { useWalletCTAState } from "@/lib/hooks/useWalletCTAState";
+import { getWalletCTAState } from "@/lib/hooks/useWalletCTAState";
 import { Button } from "@/app/components/ui/button";
 import {
   Loader2,
@@ -32,12 +32,21 @@ export const AnchorButton: React.FC<AnchorButtonProps> = ({
   className,
 }) => {
   const {
+    isAvailable,
     isConnected,
+    isReady,
+    readinessError,
     connect,
     anchor,
     isLoading,
   } = useStellarWallet();
-  const walletCTA = useWalletCTAState();
+  const walletCTA = getWalletCTAState({
+    isFreighterInstalled: isAvailable,
+    isConnected,
+    isReady,
+    readinessError,
+    isLoading,
+  });
 
   const addActivity = useActivityStore((s) => s.addActivity);
   const updateActivity = useActivityStore((s) => s.updateActivity);

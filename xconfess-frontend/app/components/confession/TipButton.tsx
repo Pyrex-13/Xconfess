@@ -8,7 +8,7 @@ import {
   type TipStats,
 } from "@/lib/services/tipping.service";
 import { useWallet } from "@/lib/hooks/useWallet";
-import { useWalletCTAState } from "@/lib/hooks/useWalletCTAState";
+import { getWalletCTAState } from "@/lib/hooks/useWalletCTAState";
 import { useActivityStore } from "@/app/lib/store/activity.store";
 import { v4 as uuidv4 } from "uuid";
 
@@ -34,8 +34,9 @@ export const TipButton = ({
   const [pendingTxHash, setPendingTxHash] = useState<string | null>(null);
   const [stats, setStats] = useState<TipStats | null>(initialStats || null);
 
-  const { isConnected, connect } = useWallet();
-  const walletCTA = useWalletCTAState({ extraDisabled: isSending });
+  const wallet = useWallet();
+  const { isConnected, connect } = wallet;
+  const walletCTA = getWalletCTAState(wallet, { extraDisabled: isSending });
 
   useEffect(() => {
     const fetchStats = async () => {
