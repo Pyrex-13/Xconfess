@@ -1,28 +1,41 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { adminApi, Report } from '@/app/lib/api/admin';
-import ReportDetail from './ReportDetail';
-import { exportToCSV } from '@/app/lib/utils/csvExport';
+import { useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { adminApi, Report } from "@/app/lib/api/admin";
+import ReportDetail from "./ReportDetail";
+import { ConfirmDialog } from "@/app/components/admin/ConfirmDialog";
+import { useGlobalToast } from "@/app/components/common/Toast";
+import { useExportCSV } from "@/app/lib/hooks/useExportCSV";
+import { ExportCsvButton } from "@/app/components/admin/ExportCsvButton";
 
 export default function ReportList() {
   const [selectedReport, setSelectedReport] = useState<string | null>(null);
-  const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [typeFilter, setTypeFilter] = useState<string>('all');
-  const [startDate, setStartDate] = useState<string>('');
-  const [endDate, setEndDate] = useState<string>('');
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [typeFilter, setTypeFilter] = useState<string>("all");
+  const [startDate, setStartDate] = useState<string>("");
+  const [endDate, setEndDate] = useState<string>("");
   const [page, setPage] = useState(1);
+  const [bulkResolveOpen, setBulkResolveOpen] = useState(false);
   const limit = 20;
 
   const queryClient = useQueryClient();
+  const toast = useGlobalToast();
+  const { triggerExport, isExporting: isExportingCsv } = useExportCSV({ label: 'reports' });
 
   const { data, isLoading } = useQuery({
-    queryKey: ['admin-reports', statusFilter, typeFilter, startDate, endDate, page],
+    queryKey: [
+      "admin-reports",
+      statusFilter,
+      typeFilter,
+      startDate,
+      endDate,
+      page,
+    ],
     queryFn: () =>
       adminApi.getReports({
-        status: statusFilter !== 'all' ? statusFilter : undefined,
-        type: typeFilter !== 'all' ? typeFilter : undefined,
+        status: statusFilter !== "all" ? statusFilter : undefined,
+        type: typeFilter !== "all" ? typeFilter : undefined,
         startDate: startDate ? new Date(startDate).toISOString() : undefined,
         endDate: endDate ? new Date(endDate).toISOString() : undefined,
         limit,
@@ -33,8 +46,36 @@ export default function ReportList() {
   const resolveMutation = useMutation({
     mutationFn: ({ id, notes }: { id: string; notes?: string }) =>
       adminApi.resolveReport(id, notes),
+    onMutate: async ({ id }) => {
+      await queryClient.cancelQueries({ queryKey: ["admin-reports"] });
+      const previousData = queryClient.getQueryData(["admin-reports"]);
+      queryClient.setQueriesData(
+        { queryKey: ["admin-reports"] },
+        (old: any) => {
+          if (!old?.reports) return old;
+          return {
+            ...old,
+            reports: old.reports.map((r: Report) =>
+              r.id === id ? { ...r, status: "resolved" } : r,
+            ),
+          };
+        },
+      );
+      return { previousData };
+    },
+    onError: (err, newReport, context) => {
+      if (context?.previousData) {
+        queryClient.setQueriesData(
+          { queryKey: ["admin-reports"] },
+          context.previousData,
+        );
+      }
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin-reports'] });
+      toast.success("Report resolved.");
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin-reports"] });
       setSelectedReport(null);
     },
   });
@@ -42,8 +83,36 @@ export default function ReportList() {
   const dismissMutation = useMutation({
     mutationFn: ({ id, notes }: { id: string; notes?: string }) =>
       adminApi.dismissReport(id, notes),
+    onMutate: async ({ id }) => {
+      await queryClient.cancelQueries({ queryKey: ["admin-reports"] });
+      const previousData = queryClient.getQueryData(["admin-reports"]);
+      queryClient.setQueriesData(
+        { queryKey: ["admin-reports"] },
+        (old: any) => {
+          if (!old?.reports) return old;
+          return {
+            ...old,
+            reports: old.reports.map((r: Report) =>
+              r.id === id ? { ...r, status: "dismissed" } : r,
+            ),
+          };
+        },
+      );
+      return { previousData };
+    },
+    onError: (err, newReport, context) => {
+      if (context?.previousData) {
+        queryClient.setQueriesData(
+          { queryKey: ["admin-reports"] },
+          context.previousData,
+        );
+      }
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin-reports'] });
+      toast.success("Report dismissed.");
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin-reports"] });
       setSelectedReport(null);
     },
   });
@@ -51,8 +120,36 @@ export default function ReportList() {
   const bulkResolveMutation = useMutation({
     mutationFn: ({ ids, notes }: { ids: string[]; notes?: string }) =>
       adminApi.bulkResolveReports(ids, notes),
+    onMutate: async ({ ids }) => {
+      await queryClient.cancelQueries({ queryKey: ["admin-reports"] });
+      const previousData = queryClient.getQueryData(["admin-reports"]);
+      queryClient.setQueriesData(
+        { queryKey: ["admin-reports"] },
+        (old: any) => {
+          if (!old?.reports) return old;
+          return {
+            ...old,
+            reports: old.reports.map((r: Report) =>
+              ids.includes(r.id) ? { ...r, status: "resolved" } : r,
+            ),
+          };
+        },
+      );
+      return { previousData };
+    },
+    onError: (err, variables, context) => {
+      if (context?.previousData) {
+        queryClient.setQueriesData(
+          { queryKey: ["admin-reports"] },
+          context.previousData,
+        );
+      }
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin-reports'] });
+      toast.success("Selected reports resolved.");
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin-reports"] });
     },
   });
 
@@ -70,14 +167,13 @@ export default function ReportList() {
 
   const handleBulkResolve = () => {
     if (selectedIds.size === 0) return;
-    if (confirm(`Resolve ${selectedIds.size} selected reports?`)) {
-      bulkResolveMutation.mutate({ ids: Array.from(selectedIds) });
-      setSelectedIds(new Set());
-    }
+    setBulkResolveOpen(true);
   };
 
   if (isLoading) {
-    return <div className="text-center py-8 text-gray-500">Loading reports...</div>;
+    return (
+      <div className="text-center py-8 text-gray-500">Loading reports...</div>
+    );
   }
 
   const reports = data?.reports || [];
@@ -91,8 +187,12 @@ export default function ReportList() {
         <ReportDetail
           report={report}
           onBack={() => setSelectedReport(null)}
-          onResolve={(notes) => resolveMutation.mutate({ id: report.id, notes })}
-          onDismiss={(notes) => dismissMutation.mutate({ id: report.id, notes })}
+          onResolve={(notes) =>
+            resolveMutation.mutate({ id: report.id, notes })
+          }
+          onDismiss={(notes) =>
+            dismissMutation.mutate({ id: report.id, notes })
+          }
         />
       );
     }
@@ -100,6 +200,21 @@ export default function ReportList() {
 
   return (
     <div className="space-y-4">
+      <ConfirmDialog
+        open={bulkResolveOpen}
+        onOpenChange={setBulkResolveOpen}
+        title="Resolve selected reports?"
+        description={`This will mark ${selectedIds.size} selected reports as resolved.`}
+        confirmLabel="Resolve"
+        variant="danger"
+        loading={bulkResolveMutation.isPending}
+        onConfirm={() => {
+          bulkResolveMutation.mutate({ ids: Array.from(selectedIds) });
+          setSelectedIds(new Set());
+          setBulkResolveOpen(false);
+        }}
+      />
+
       {/* Filters */}
       <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-4">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-5">
@@ -138,7 +253,9 @@ export default function ReportList() {
               <option value="spam">Spam</option>
               <option value="harassment">Harassment</option>
               <option value="hate_speech">Hate Speech</option>
-              <option value="inappropriate_content">Inappropriate Content</option>
+              <option value="inappropriate_content">
+                Inappropriate Content
+              </option>
               <option value="copyright">Copyright</option>
               <option value="other">Other</option>
             </select>
@@ -172,23 +289,27 @@ export default function ReportList() {
             />
           </div>
           <div className="flex items-end gap-2">
-            <button
+            <ExportCsvButton
               onClick={() => {
-                const exportData = reports.map((r: Report) => ({
+                const exportData: Record<string, unknown>[] = reports.map((r: Report) => ({
                   id: r.id,
                   type: r.type,
                   status: r.status,
-                  reporter: r.reporter?.username || 'Anonymous',
-                  reason: r.reason || '',
+                  reporter: r.reporter?.username || "Anonymous",
+                  reason: r.reason || "",
                   createdAt: new Date(r.createdAt).toLocaleString(),
-                  resolvedAt: r.resolvedAt ? new Date(r.resolvedAt).toLocaleString() : '',
+                  resolvedAt: r.resolvedAt
+                    ? new Date(r.resolvedAt).toLocaleString()
+                    : "",
                 }));
-                exportToCSV(exportData, `reports-${new Date().toISOString().split('T')[0]}.csv`);
+                triggerExport(
+                  exportData,
+                  `reports-${new Date().toISOString().split("T")[0]}.csv`,
+                );
               }}
-              className="bg-gray-600 text-white px-4 py-2 rounded-md hover:bg-gray-700 text-sm"
-            >
-              Export CSV
-            </button>
+              isExporting={isExportingCsv}
+              label="Export Reports CSV"
+            />
             {selectedIds.size > 0 && (
               <button
                 onClick={handleBulkResolve}
@@ -238,7 +359,10 @@ export default function ReportList() {
           </thead>
           <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
             {reports.map((report: Report) => (
-              <tr key={report.id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
+              <tr
+                key={report.id}
+                className="hover:bg-gray-50 dark:hover:bg-gray-700"
+              >
                 <td className="px-6 py-4 whitespace-nowrap">
                   <input
                     type="checkbox"
@@ -253,18 +377,18 @@ export default function ReportList() {
                 <td className="px-6 py-4 whitespace-nowrap">
                   <span
                     className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                      report.status === 'pending'
-                        ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-800 dark:text-yellow-100'
-                        : report.status === 'resolved'
-                        ? 'bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-100'
-                        : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200'
+                      report.status === "pending"
+                        ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-800 dark:text-yellow-100"
+                        : report.status === "resolved"
+                          ? "bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-100"
+                          : "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200"
                     }`}
                   >
                     {report.status}
                   </span>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                  {report.reporter?.username || 'Anonymous'}
+                  {report.reporter?.username || "Anonymous"}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
                   {new Date(report.createdAt).toLocaleDateString()}
@@ -287,7 +411,8 @@ export default function ReportList() {
       {totalPages > 1 && (
         <div className="flex items-center justify-between">
           <div className="text-sm text-gray-700 dark:text-gray-300">
-            Showing {(page - 1) * limit + 1} to {Math.min(page * limit, total)} of {total} results
+            Showing {(page - 1) * limit + 1} to {Math.min(page * limit, total)}{" "}
+            of {total} results
           </div>
           <div className="flex gap-2">
             <button

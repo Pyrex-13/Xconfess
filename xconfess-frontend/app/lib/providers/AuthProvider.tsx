@@ -1,15 +1,16 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
 import { authApi } from '../api/authService';
-import { AUTH_TOKEN_KEY, USER_DATA_KEY } from '../api/constants';
 import {
   AuthContextValue,
   AuthState,
   LoginCredentials,
   RegisterData,
+  User,
 } from '../types/auth';
 import { useAuthStore } from '../store/authStore';
+import { getErrorMessage } from '../utils/errorHandler';
 
 /**
  * Auth Context
@@ -29,9 +30,10 @@ interface AuthProviderProps {
  */
 export function AuthProvider({ children }: AuthProviderProps) {
   const setStoreUser = useAuthStore((s) => s.setUser);
-  const setStoreLoading = useAuthStore((s) => s.setLoading);
-  const setStoreError = useAuthStore((s) => s.setError);
   const storeLogout = useAuthStore((s) => s.logout);
+  const isDevBypassEnabled =
+    process.env.NODE_ENV === "development" &&
+    process.env.NEXT_PUBLIC_DEV_BYPASS_AUTH === "true";
 
   const [state, setState] = useState<AuthState>({
     user: null,
@@ -46,7 +48,25 @@ export function AuthProvider({ children }: AuthProviderProps) {
   /**
   * Check if user is authenticated by validating token with backend
   */
-  const checkAuth = async (): Promise<void> => {
+  const checkAuth = useCallback(async (): Promise<void> => {
+    if (isDevBypassEnabled) {
+      const mockUser = {
+        id: "dev-user",
+        username: "dev",
+        email: "dev@example.com",
+        role: "admin",
+      };
+
+      setStoreUser(mockUser as never);
+      setState({
+        user: mockUser as never,
+        isAuthenticated: true,
+        isLoading: false,
+        error: null,
+      });
+      return;
+    }
+
     try {
       const user = await authApi.getCurrentUser();
       setStoreUser(user);
@@ -56,7 +76,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         isLoading: false,
         error: null,
       });
-    } catch (error) {
+    } catch {
       // Not authenticated or session expired
       setStoreUser(null);
       setState({
@@ -66,7 +86,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         error: null, // Don't show error for initial check
       });
     }
-  };
+  }, [isDevBypassEnabled, setStoreUser]);
 
   //   Check authentication status on mount
 
@@ -75,11 +95,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
     (async () => {
       await checkAuth();
     })();
-  }, []);
+  }, [checkAuth]);
 
   //  Login user with credentials
 
-  const login = async (credentials: LoginCredentials): Promise<void> => {
+  const login = async (credentials: LoginCredentials): Promise<User> => {
     setState((prev) => ({ ...prev, isLoading: true, error: null }));
 
     try {
@@ -95,12 +115,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
         isLoading: false,
         error: null,
       });
+      return response.user;
     } catch (error) {
       setState({
         user: null,
         isAuthenticated: false,
         isLoading: false,
-        error: error instanceof Error ? error.message : 'Login failed',
+        error: getErrorMessage(error),
       });
       throw error;
     }
@@ -123,7 +144,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         user: null,
         isAuthenticated: false,
         isLoading: false,
-        error: error instanceof Error ? error.message : 'Registration failed',
+        error: getErrorMessage(error),
       });
       throw error;
     }

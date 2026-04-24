@@ -5,8 +5,14 @@ import {
   InternalServerErrorException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import {
+  decodeCursor,
+  encodeCursor,
+  CursorPaginatedResponseDto,
+} from '../common/pagination';
 import { AnonymousConfessionRepository } from './repository/confession.repository';
 import { CreateConfessionDto } from './dto/create-confession.dto';
+import { GetConfessionsByTagDto } from './dto/get-confessions-by-tag.dto';
 import { UpdateConfessionDto } from './dto/update-confession.dto';
 import { SearchConfessionDto } from './dto/search-confession.dto';
 import { GetConfessionsDto, SortOrder } from './dto/get-confessions.dto';
@@ -36,11 +42,12 @@ import { AnchorConfessionDto } from '../stellar/dto/anchor-confession.dto';
 import { CacheService } from '../cache/cache.service';
 import { TagService } from './tag.service';
 import { ConfessionTag } from './entities/confession-tag.entity';
+import { toWindowBoundaries, TrendingWindow } from 'src/types/analytics.types';
 
 @Injectable()
 export class ConfessionService {
   constructor(
-    private confessionRepo: AnonymousConfessionRepository,
+    private readonly confessionRepo: AnonymousConfessionRepository,
     private viewCache: ConfessionViewCacheService,
     private readonly aiModerationService: AiModerationService,
     private readonly moderationRepoService: ModerationRepositoryService,
@@ -52,7 +59,7 @@ export class ConfessionService {
     private readonly cacheService: CacheService,
     private readonly tagService: TagService,
     private readonly configService: ConfigService,
-  ) { }
+  ) {}
 
   private get aesKey(): string {
     return this.configService.get<string>('app.confessionAesKey', '');
@@ -71,6 +78,17 @@ export class ConfessionService {
     const msg = this.sanitizeMessage(dto.message);
     if (!msg) throw new BadRequestException('Invalid confession content');
 
+    // Idempotency: return existing confession if key was already processed
+    if (dto.idempotencyKey) {
+      const existing = await this.confessionRepo.findOne({
+        where: { idempotencyKey: dto.idempotencyKey },
+      });
+      if (existing) {
+        existing.message = decryptConfession(existing.message, this.aesKey);
+        return existing;
+      }
+    }
+
     try {
       // Step 0: Validate tags if provided
       let validatedTags: any[] = [];
@@ -85,8 +103,8 @@ export class ConfessionService {
       // Step 1.5: Create an AnonymousUser to associate with this confession
       const anonymousUser = manager
         ? await manager
-          .getRepository(AnonymousUser)
-          .save(manager.getRepository(AnonymousUser).create())
+            .getRepository(AnonymousUser)
+            .save(manager.getRepository(AnonymousUser).create())
         : await this.anonymousUserService.create();
 
       // Step 2: Encrypt and save the confession
@@ -129,6 +147,7 @@ export class ConfessionService {
         isHidden: moderationResult.status === ModerationStatus.REJECTED,
         moderationDetails: moderationResult.details,
         ...stellarData,
+        ...(dto.idempotencyKey ? { idempotencyKey: dto.idempotencyKey } : {}),
       });
 
       const savedConfession = await confessionRepo.save(conf);
@@ -187,14 +206,18 @@ export class ConfessionService {
   }
 
   async getConfessions(dto: GetConfessionsDto) {
-    const page = dto.page ?? 1;
     const limit = dto.limit ?? 10;
-    if (limit < 1 || limit > 100)
-      throw new BadRequestException('limit must be 1–100');
+    const sort = dto.sort || SortOrder.NEWEST;
+
+    // Use cursor if provided
+    const parsedCursor = decodeCursor<{ id: string; created_at: string }>(
+      dto.cursor,
+    );
 
     const cacheKey = this.cacheService.buildKey(
       'confessions',
-      page,
+      dto.cursor || 'no-cursor',
+      dto.page || 1,
       limit,
       dto.gender || 'all',
       dto.sort || 'recent',
@@ -205,14 +228,19 @@ export class ConfessionService {
       return cached;
     }
 
-    const skip = (page - 1) * limit;
     const qb = this.confessionRepo
       .createQueryBuilder('confession')
+      .leftJoinAndSelect('confession.anonymousUser', 'anonymousUser')
+      .leftJoinAndSelect('anonymousUser.userLinks', 'userLinks')
+      .leftJoinAndSelect('userLinks.user', 'user')
       .andWhere('confession.isDeleted = false')
       .andWhere('confession.isHidden = false')
       .andWhere('confession.moderationStatus IN (:...statuses)', {
         statuses: [ModerationStatus.APPROVED, ModerationStatus.PENDING],
       })
+      .andWhere(
+        "(anonymousUser.userLinks IS NULL OR anonymousUser.userLinks = '{}' OR user.privacy_settings IS NULL OR user.privacy_settings->>'isDiscoverable' = 'true' OR JSON_TYPE(user.privacy_settings, '$.isDiscoverable') IS NULL)",
+      )
       .leftJoinAndSelect('confession.reactions', 'reactions')
       .leftJoinAndSelect('reactions.anonymousUser', 'reactionUser')
       .select([
@@ -232,7 +260,18 @@ export class ConfessionService {
       qb.andWhere('confession.gender = :gender', { gender: dto.gender });
     }
 
-    if (dto.sort === SortOrder.TRENDING) {
+    // Apply cursor or page-based filter
+    if (parsedCursor && sort === SortOrder.NEWEST) {
+      qb.andWhere(
+        '(confession.created_at < :createdAt OR (confession.created_at = :createdAt AND confession.id < :id))',
+        { createdAt: parsedCursor.created_at, id: parsedCursor.id },
+      );
+    } else if (dto.page && dto.page > 1) {
+      const skip = (dto.page - 1) * limit;
+      qb.skip(skip);
+    }
+
+    if (sort === SortOrder.TRENDING) {
       qb.addSelect(
         (sub) =>
           sub
@@ -244,25 +283,41 @@ export class ConfessionService {
         .orderBy('reaction_count', 'DESC')
         .addOrderBy('confession.created_at', 'DESC');
     } else {
-      qb.orderBy('confession.created_at', 'DESC');
+      qb.orderBy('confession.created_at', 'DESC').addOrderBy(
+        'confession.id',
+        'DESC',
+      );
     }
 
-    const total = await qb.getCount();
-    const items = await qb.skip(skip).take(limit).getMany();
+    // Fetch one extra to determine if there's more
+    const items = await qb.take(limit + 1).getMany();
+    const hasMore = items.length > limit;
+    const resultItems = hasMore ? items.slice(0, limit) : items;
 
-    const decryptedItems = items.map((item) => ({
+    const decryptedItems = resultItems.map((item) => ({
       ...item,
       message: decryptConfession(item.message, this.aesKey),
     }));
 
-    const result = {
-      data: decryptedItems,
-      meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
-    };
+    let nextCursor: string | null = null;
+    if (hasMore && decryptedItems.length > 0) {
+      const lastItem = items[limit - 1];
+      nextCursor = encodeCursor({
+        id: lastItem.id,
+        created_at: lastItem.created_at.toISOString(),
+      });
+    }
 
-    await this.cacheService.set(cacheKey, result, 300);
+    const response = new CursorPaginatedResponseDto(
+      decryptedItems,
+      nextCursor,
+      hasMore,
+      limit,
+    );
 
-    return result;
+    await this.cacheService.set(cacheKey, response, 300);
+
+    return response;
   }
 
   async update(id: string, dto: UpdateConfessionDto) {
@@ -303,7 +358,8 @@ export class ConfessionService {
     }
 
     const updated = await this.confessionRepo.findOne({ where: { id } });
-    if (updated) updated.message = decryptConfession(updated.message, this.aesKey);
+    if (updated)
+      updated.message = decryptConfession(updated.message, this.aesKey);
     return updated;
   }
 
@@ -328,9 +384,7 @@ export class ConfessionService {
       where: { id, isDeleted: true },
     });
     if (!existing)
-      throw new NotFoundException(
-        `Soft-deleted confession ${id} not found`,
-      );
+      throw new NotFoundException(`Soft-deleted confession ${id} not found`);
     await this.confessionRepo.update(id, {
       isDeleted: false,
       deletedAt: null,
@@ -360,16 +414,89 @@ export class ConfessionService {
     };
   }
 
+  /**
+   * Determine whether this query should be sampled for observability.
+   * Uses Math.random() against the configured sample rate so that overhead
+   * stays bounded under high traffic.
+   */
+  private shouldSampleSearch(): boolean {
+    const rate = this.configService.get<number>('app.searchSampleRate', 0.1);
+    return Math.random() < rate;
+  }
+
+  /**
+   * Emit observability signals after a search call completes.
+   * Always warns on slow queries; emits a sampled info log otherwise.
+   */
+  private emitSearchObservability(opts: {
+    durationMs: number;
+    rawTerm: string;
+    searchType: 'fulltext' | 'hybrid' | 'ilike';
+    page: number;
+    limit: number;
+    resultCount: number;
+    sampled: boolean;
+  }): void {
+    const thresholdMs = this.configService.get<number>(
+      'app.searchSlowQueryThresholdMs',
+      500,
+    );
+
+    this.logger.observeTimer('search.duration_ms', opts.durationMs, {
+      searchType: opts.searchType,
+    });
+
+    if (opts.durationMs >= thresholdMs) {
+      this.logger.logSlowSearch({
+        durationMs: opts.durationMs,
+        rawTerm: opts.rawTerm,
+        searchType: opts.searchType,
+        page: opts.page,
+        limit: opts.limit,
+        resultCount: opts.resultCount,
+        thresholdMs,
+      });
+      return;
+    }
+
+    if (opts.sampled) {
+      this.logger.logSampledSearch({
+        durationMs: opts.durationMs,
+        rawTerm: opts.rawTerm,
+        searchType: opts.searchType,
+        page: opts.page,
+        limit: opts.limit,
+        resultCount: opts.resultCount,
+      });
+    }
+  }
+
   async search(dto: SearchConfessionDto) {
     if (!dto.q.trim())
       throw new BadRequestException('Search term cannot be empty');
     const limit =
       typeof dto.limit === 'number' ? dto.limit : Number(dto.limit) || 10;
+    const sampled = this.shouldSampleSearch();
+    const t0 = Date.now();
     const result = await this.confessionRepo.hybridSearch(
       dto.q.trim(),
       dto.page,
       limit,
+      dto,
     );
+    const durationMs = Date.now() - t0;
+    const resultCount = result?.confessions?.length ?? 0;
+
+    this.emitSearchObservability({
+      durationMs,
+      rawTerm: dto.q,
+      searchType: 'hybrid',
+      page: dto.page ?? 1,
+      limit,
+      resultCount,
+      sampled,
+    });
+
     return {
       data: result?.confessions || [],
       meta: {
@@ -387,11 +514,27 @@ export class ConfessionService {
       throw new BadRequestException('Search term cannot be empty');
     const limit =
       typeof dto.limit === 'number' ? dto.limit : Number(dto.limit) || 10;
+    const sampled = this.shouldSampleSearch();
+    const t0 = Date.now();
     const result = await this.confessionRepo.fullTextSearch(
       dto.q.trim(),
       dto.page,
       limit,
+      dto,
     );
+    const durationMs = Date.now() - t0;
+    const resultCount = result?.confessions?.length ?? 0;
+
+    this.emitSearchObservability({
+      durationMs,
+      rawTerm: dto.q,
+      searchType: 'fulltext',
+      page: dto.page ?? 1,
+      limit,
+      resultCount,
+      sampled,
+    });
+
     return {
       data: result?.confessions || [],
       meta: {
@@ -408,7 +551,13 @@ export class ConfessionService {
   async getConfessionByIdWithViewCount(id: string, req: Request) {
     const conf = await this.confessionRepo.findOne({
       where: { id, isDeleted: false, isHidden: false },
-      relations: ['reactions', 'reactions.anonymousUser'],
+      relations: [
+        'anonymousUser',
+        'anonymousUser.userLinks',
+        'anonymousUser.userLinks.user',
+        'reactions',
+        'reactions.anonymousUser',
+      ],
       select: {
         id: true,
         message: true,
@@ -428,6 +577,12 @@ export class ConfessionService {
     });
     if (!conf) throw new NotFoundException('Confession not found');
 
+    const authorUser = conf.anonymousUser?.userLinks?.[0]?.user;
+    const hideReactions = authorUser && !authorUser.shouldShowReactions();
+    if (hideReactions) {
+      conf.reactions = [];
+    }
+
     type AuthenticatedRequest = Request & { user?: { id?: string } };
     const authReq = req as AuthenticatedRequest;
     const userId = authReq.user?.id;
@@ -440,12 +595,23 @@ export class ConfessionService {
 
     if (await this.viewCache.checkAndMarkView(id, userOrIp)) {
       await this.confessionRepo.incrementViewCountAtomically(id);
-      // Reload the confession to get updated view_count
       const updated = await this.confessionRepo.findOne({
         where: { id },
-        relations: ['reactions', 'reactions.anonymousUser'],
+        relations: [
+          'anonymousUser',
+          'anonymousUser.userLinks',
+          'anonymousUser.userLinks.user',
+          'reactions',
+          'reactions.anonymousUser',
+        ],
       });
-      if (updated) updated.message = decryptConfession(updated.message, this.aesKey);
+      if (updated) {
+        const updatedAuthor = updated.anonymousUser?.userLinks?.[0]?.user;
+        if (updatedAuthor && !updatedAuthor.shouldShowReactions()) {
+          updated.reactions = [];
+        }
+        updated.message = decryptConfession(updated.message, this.aesKey);
+      }
       return updated;
     }
 
@@ -454,7 +620,10 @@ export class ConfessionService {
   }
 
   async getTrendingConfessions() {
-    const confs = await this.confessionRepo.findTrending(10);
+    // Standardize the trending window to 24 h with UTC-floored boundaries
+    // so edge-of-day records are counted consistently.
+    const { startAt, endAt } = toWindowBoundaries(TrendingWindow.DAY);
+    const confs = await this.confessionRepo.findTrending(10, startAt, endAt);
     return { data: confs };
   }
 
@@ -553,7 +722,7 @@ export class ConfessionService {
     return data;
   }
 
-  private async findByUser(userId: string) {
+  private async findByUser(_userId: string) {
     // Implementation
     return [];
   }
@@ -708,7 +877,10 @@ export class ConfessionService {
   /**
    * Get confessions filtered by tag with pagination
    */
-  async getConfessionsByTag(tagName: string, dto: any) {
+  /**
+   * Get confessions filtered by tag with pagination
+   */
+  async getConfessionsByTag(tagName: string, dto: GetConfessionsByTagDto) {
     const page = dto.page ?? 1;
     const limit = dto.limit ?? 10;
 
@@ -722,11 +894,12 @@ export class ConfessionService {
       throw new NotFoundException(`Tag '${tagName}' not found`);
     }
 
+    const cursor = dto.cursor;
     const cacheKey = this.cacheService.buildKey(
       'confessions',
       'tag',
       tagName,
-      page,
+      cursor || `page_${page}`,
       limit,
       dto.sort || 'newest',
     );
@@ -736,27 +909,20 @@ export class ConfessionService {
       return cached;
     }
 
-    const { confessions, total } = await this.confessionRepo.findByTag(
-      tagName,
-      page,
-      limit,
-    );
+    const { confessions, nextCursor, hasMore } =
+      await this.confessionRepo.findByTag(tagName, page, limit, cursor);
 
     const decryptedItems = confessions.map((item) => ({
       ...item,
       message: decryptConfession(item.message, this.aesKey),
     }));
 
-    const result = {
-      data: decryptedItems,
-      meta: {
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
-        tag: tagName,
-      },
-    };
+    const result = new CursorPaginatedResponseDto(
+      decryptedItems,
+      nextCursor || null,
+      hasMore,
+      limit,
+    );
 
     await this.cacheService.set(cacheKey, result, 300);
 

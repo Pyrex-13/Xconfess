@@ -16,23 +16,23 @@ import { AiModerationService, ModerationStatus } from './ai-moderation.service';
 import { ModerationRepositoryService } from './moderation-repository.service';
 
 class TestModerationDto {
-  content: string;
+  content!: string;
 }
 
 class ReviewModerationDto {
-  status: ModerationStatus;
+  status!: ModerationStatus;
   notes?: string;
 }
 
 class UpdateThresholdsDto {
-  highThreshold: number;
-  mediumThreshold: number;
+  highThreshold!: number;
+  mediumThreshold!: number;
 }
 
 /**
  * Admin-only moderation controller
  * All endpoints require JWT authentication and admin role
- * 
+ *
  * Protected endpoints:
  * - GET /admin/moderation/pending - Get pending reviews
  * - POST /admin/moderation/review/:id - Review moderation item
@@ -171,6 +171,9 @@ export class ModerationController {
     @Param('userId') userId: string,
     @Query('limit') limit = 100,
   ) {
-    return await this.moderationRepoService.getLogsByUser(userId, Number(limit));
+    return await this.moderationRepoService.getLogsByUser(
+      userId,
+      Number(limit),
+    );
   }
 }

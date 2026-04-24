@@ -1,5 +1,6 @@
-pub mod model;
-pub mod logic;
 pub mod events;
+pub mod logic;
+pub mod model;
+pub mod storage;
 
-pub use logic::{propose, accept, cancel};
+pub use logic::{approve, execute, get_config, propose, revoke, set_config};

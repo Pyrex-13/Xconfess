@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, ChevronRight, Eye, AlertCircle } from "lucide-react";
@@ -12,8 +13,10 @@ import { ShareButton } from "@/app/components/confession/ShareButton";
 import { CommentSection } from "@/app/components/confession/CommentSection";
 import { RelatedConfessions } from "@/app/components/confession/RelatedConfessions";
 import { formatDate } from "@/app/lib/utils/formatDate";
+import { queryKeys } from "@/app/lib/api/queryKeys";
 import { useAuth } from "@/app/lib/hooks/useAuth";
 import { getConfessionById } from "@/app/lib/api/confessions";
+import { createConfessionReport } from "@/app/lib/api/reports";
 
 interface ConfessionDetailClientProps {
   initialConfession: {
@@ -35,30 +38,45 @@ export function ConfessionDetailClient({
 }: ConfessionDetailClientProps) {
   const router = useRouter();
   const { user } = useAuth();
-  const [confession, setConfession] = useState(initialConfession);
-  const [refetching, setRefetching] = useState(false);
+  const [reportStatus, setReportStatus] = useState<
+    "idle" | "pending" | "success" | "error"
+  >("idle");
+  const [reportError, setReportError] = useState<string | null>(null);
+  const { data: confession = initialConfession, isFetching, refetch } = useQuery({
+    queryKey: queryKeys.confessions.detail(confessionId),
+    queryFn: async () => {
+      const result = await getConfessionById(confessionId);
+      if (!result.ok) {
+        throw new Error(result.error.message);
+      }
+      return result.data;
+    },
+    initialData: initialConfession,
+  });
 
-  useEffect(() => {
-    setConfession(initialConfession);
-  }, [initialConfession]);
+  const submitReport = async () => {
+    if (reportStatus === "pending" || reportStatus === "success") return;
 
-  const refetch = async () => {
-    setRefetching(true);
-    const result = await getConfessionById(confessionId);
-    if (result.ok && result.data) {
-      setConfession({
-        id: result.data.id,
-        content: result.data.content,
-        createdAt: result.data.createdAt,
-        viewCount: result.data.viewCount,
-        reactions: result.data.reactions ?? { like: 0, love: 0 },
-        commentCount: result.data.commentCount,
-        isAnchored: result.data.isAnchored,
-        stellarTxHash: result.data.stellarTxHash,
+    setReportStatus("pending");
+    setReportError(null);
+
+    try {
+      const result = await createConfessionReport(confessionId, {
+        type: "other",
       });
+
+      if (result.ok) {
+        setReportStatus("success");
+      } else {
+        setReportStatus("error");
+        setReportError(result.error.message);
+      }
+    } catch (err) {
+      setReportStatus("error");
+      setReportError(err instanceof Error ? err.message : "Report submission failed.");
     }
-    setRefetching(false);
   };
+
 
   const dateLabel = formatDate(new Date(confession.createdAt));
 
@@ -112,7 +130,7 @@ export function ConfessionDetailClient({
             </div>
           </CardHeader>
           <CardContent className="pt-0">
-            <p className="text-white text-lg leading-relaxed whitespace-pre-wrap break-all">
+            <p className="text-white text-lg leading-relaxed whitespace-pre-wrap wrap-break-word overflow-wrap-anywhere">
               {confession.content}
             </p>
 
@@ -134,7 +152,9 @@ export function ConfessionDetailClient({
                   confessionContent={confession.content}
                   isAnchored={confession.isAnchored}
                   stellarTxHash={confession.stellarTxHash}
-                  onAnchorSuccess={() => refetch()}
+                  onAnchorSuccess={() => {
+                    void refetch();
+                  }}
                 />
               </div>
               <ShareButton confessionId={confessionId} variant="dropdown" />
@@ -148,24 +168,47 @@ export function ConfessionDetailClient({
               </p>
             )}
 
-            {refetching && (
+            {isFetching && (
               <p className="mt-2 text-xs text-zinc-500">Updating…</p>
             )}
           </CardContent>
         </Card>
 
-        {/* Report (placeholder) */}
+        {/* Report */}
         <div className="mb-8 flex justify-end">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-zinc-500 hover:text-zinc-400"
-            onClick={() => {}}
-            aria-label="Report confession (coming soon)"
-          >
-            <AlertCircle className="h-4 w-4 mr-1" />
-            Report
-          </Button>
+          <div className="flex flex-col items-end">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-zinc-500 hover:text-zinc-400"
+              disabled={reportStatus === "pending" || reportStatus === "success"}
+              onClick={submitReport}
+              aria-label="Report confession"
+            >
+              <AlertCircle className="h-4 w-4 mr-1" />
+              {reportStatus === "pending"
+                ? "Reporting..."
+                : reportStatus === "success"
+                  ? "Reported"
+                  : "Report"}
+            </Button>
+
+            {reportStatus === "pending" && (
+              <p className="mt-2 text-xs text-zinc-500">
+                Submitting report…
+              </p>
+            )}
+            {reportStatus === "success" && (
+              <p className="mt-2 text-xs text-emerald-600 dark:text-emerald-400">
+                Report submitted. Thank you!
+              </p>
+            )}
+            {reportStatus === "error" && (
+              <p className="mt-2 text-xs text-red-600 dark:text-red-400">
+                {reportError || "Report submission failed."}
+              </p>
+            )}
+          </div>
         </div>
 
         {/* Comments */}

@@ -1,25 +1,14 @@
 import React from "react";
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
-import { ThemeProvider } from "./lib/providers/ThemeProvider";
 import "./globals.css";
 import QueryProvider from "./components/providers/QueryProvider";
 import { AuthProvider } from "./lib/providers/AuthProvider";
+import { ThemeProvider } from "./lib/providers/ThemeProvider";
 import { ToastProvider } from "@/app/components/common/Toast";
 import { ErrorBoundary } from "@/app/components/common/ErrorBoundary";
 
 import { OnboardingFlow } from "@/app/components/onboarding/OnboardingFlow";
 import { HelpButton } from "@/app/components/onboarding/HelpButton";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
 
 export const metadata: Metadata = {
   title: "xConfess - Anonymous Confessions on Stellar",
@@ -34,13 +23,11 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
+      <body className="antialiased">
         <ErrorBoundary>
-          <AuthProvider>
-            <QueryProvider>
-              <ThemeProvider>
+          <ThemeProvider>
+            <AuthProvider>
+              <QueryProvider>
                 <ToastProvider>
                   {children}
 
@@ -48,9 +35,9 @@ export default function RootLayout({
                   <OnboardingFlow />
                   <HelpButton />
                 </ToastProvider>
-              </ThemeProvider>
-            </QueryProvider>
-          </AuthProvider>
+              </QueryProvider>
+            </AuthProvider>
+          </ThemeProvider>
         </ErrorBoundary>
       </body>
     </html>

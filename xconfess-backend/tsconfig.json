@@ -3,7 +3,7 @@
     "module": "commonjs",
     "target": "ES2023",
     "outDir": "./dist",
-    "rootDir": "./src",
+    "rootDir": "./",
     "declaration": true,
     "removeComments": true,
     "emitDecoratorMetadata": true,
@@ -15,18 +15,23 @@
     "incremental": true,
     "skipLibCheck": true,
     "strictNullChecks": true,
+    "strictPropertyInitialization": false,
+    "useUnknownInCatchVariables": false,
     "forceConsistentCasingInFileNames": true,
     "noImplicitAny": false,
     "strictBindCallApply": false,
     "noFallthroughCasesInSwitch": false,
+    "noEmitOnError": false,
     "moduleResolution": "node",
+    "ignoreDeprecations": "5.0",
     "types": [
       "jest",
       "node"
     ]
   },
   "include": [
-    "src/**/*.ts"
+    "src/**/*.ts",
+    "test/**/*.ts"
   ],
   "exclude": [
     "node_modules",
