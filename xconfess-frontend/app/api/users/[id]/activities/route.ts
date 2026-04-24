@@ -1,9 +1,9 @@
-import { misconfiguredBackendResponse, internalProxyErrorResponse } from "@/app/lib/utils/proxyError";
+import { internalProxyErrorResponse } from "@/app/lib/utils/proxyError";
+import { getApiBaseUrl } from "@/app/lib/config";
 
-const BASE_API_URL = process.env.BACKEND_API_URL;
+const BASE_API_URL = getApiBaseUrl();
 
 export async function GET(request: Request, { params }: { params: { id: string } }) {
-  if (!BASE_API_URL) return misconfiguredBackendResponse();
 
   try {
     const { id } = params;

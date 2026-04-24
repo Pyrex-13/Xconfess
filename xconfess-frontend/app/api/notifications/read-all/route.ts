@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createApiErrorResponse } from "@/lib/apiErrorHandler";
+import { getApiBaseUrl } from "@/app/lib/config";
+
+const BACKEND_API_URL = getApiBaseUrl();
 
 export async function PATCH(request: NextRequest) {
   try {
     const token = request.headers.get("authorization")?.replace("Bearer ", "");
 
     const response = await fetch(
-      `${process.env.BACKEND_URL}/notifications/read-all`,
+      `${BACKEND_API_URL}/notifications/read-all`,
       {
         method: "PATCH",
         headers: {

@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createApiErrorResponse } from "@/lib/apiErrorHandler";
+import { getApiBaseUrl } from "@/app/lib/config";
+
+const BACKEND_API_URL = getApiBaseUrl();
 
 export async function GET(request: NextRequest) {
   try {
     const token = request.headers.get("authorization")?.replace("Bearer ", "");
 
     const response = await fetch(
-      `${process.env.BACKEND_URL}/notifications/preferences`,
+      `${BACKEND_API_URL}/notifications/preferences`,
       {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -39,7 +42,7 @@ export async function PUT(request: NextRequest) {
     const body = await request.json();
 
     const response = await fetch(
-      `${process.env.BACKEND_URL}/notifications/preferences`,
+      `${BACKEND_API_URL}/notifications/preferences`,
       {
         method: "PUT",
         headers: {

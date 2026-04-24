@@ -1,12 +1,9 @@
 import { createApiErrorResponse } from "@/lib/apiErrorHandler";
+import { getApiBaseUrl } from "@/app/lib/config";
 
-const BASE_API_URL = process.env.BACKEND_API_URL;
+const BASE_API_URL = getApiBaseUrl();
 
 export async function GET(request: Request, { params }: { params: { id: string } }) {
-  if (!BASE_API_URL) {
-    return createApiErrorResponse("BACKEND_API_URL is not set", { status: 503 });
-  }
-
   const correlationId = request.headers.get("X-Correlation-ID") || "unknown";
 
   try {
