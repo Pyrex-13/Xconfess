@@ -6,8 +6,8 @@ import { RedisHealthIndicator } from './redis.health';
 import { SchemaReadinessHealthIndicator } from './schema-readiness.health';
 import { QueueHealthIndicator } from './queue.health';
 
-// Queue names are inlined here to keep the health module self-contained
-// and avoid importing from feature-module internals.
+// Inlined to keep the health module self-contained and avoid importing from
+// feature-module internals.
 const MONITORED_QUEUES = [
   'notifications',
   'notifications-dlq',

@@ -4,7 +4,7 @@ import {
   HealthCheckService,
   TypeOrmHealthIndicator,
 } from '@nestjs/terminus';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { RedisHealthIndicator } from './redis.health';
 import { SchemaReadinessHealthIndicator } from './schema-readiness.health';
@@ -23,17 +23,15 @@ export class HealthController {
 
   /**
    * Liveness probe — is the process responsive?
-   * No external dependency checks. Safe to call at high frequency from load
-   * balancers and Kubernetes. Returning 200 here means only "restart me if
-   * this starts failing," not "I'm ready to serve traffic."
+   * No external dependency checks. Safe to poll at high frequency.
    */
   @Get('live')
   @Throttle({ default: { limit: 120, ttl: 60_000 } })
   @ApiOperation({
     summary: 'Liveness probe',
     description:
-      'Returns 200 while the Node process is responsive. No external dependency checks. ' +
-      'Use this for Kubernetes liveness probes and load-balancer keep-alives.',
+      'Returns 200 while the Node process is responsive. ' +
+      'No external dependency checks. Use for Kubernetes liveness probes.',
   })
   @ApiResponse({ status: 200, description: 'Process is alive' })
   liveness() {
@@ -42,9 +40,7 @@ export class HealthController {
 
   /**
    * Readiness probe — are all dependencies available?
-   * Checks Postgres, Redis, BullMQ queue workers, and confession-table schema.
-   * Returns 503 when any dependency is unavailable so orchestrators can stop
-   * routing traffic to this instance.
+   * Returns 503 when any dependency is unavailable.
    */
   @Get('ready')
   @HealthCheck()
@@ -52,15 +48,14 @@ export class HealthController {
   @ApiOperation({
     summary: 'Readiness probe',
     description:
-      'Checks all external dependencies: Postgres ping, Redis ping, BullMQ queue-worker ' +
-      'presence, and confession-table schema. Returns 503 with per-check detail when any ' +
-      'dependency is unavailable. Use this for Kubernetes readiness probes.',
+      'Checks Postgres, Redis, BullMQ queue workers, and confession-table schema. ' +
+      'Returns 503 with per-check detail on failure. ' +
+      'Use for Kubernetes readiness probes.',
   })
   @ApiResponse({ status: 200, description: 'All dependencies ready' })
   @ApiResponse({
     status: 503,
-    description:
-      'One or more dependencies unavailable — see response body for per-check detail',
+    description: 'One or more dependencies unavailable',
   })
   readiness() {
     return this.health.check([
@@ -71,17 +66,15 @@ export class HealthController {
     ]);
   }
 
-  /**
-   * Backward-compatible alias for GET /health/ready.
-   * Prefer /health/ready for new integrations.
-   */
+  /** Backward-compatible alias for GET /health/ready. */
   @Get()
   @HealthCheck()
   @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @ApiOperation({
     summary: 'Health check (readiness alias)',
     description:
-      'Backward-compatible alias for GET /health/ready. Prefer /health/ready for new integrations.',
+      'Backward-compatible alias for GET /health/ready. ' +
+      'Prefer /health/ready for new integrations.',
   })
   @ApiResponse({ status: 200, description: 'All checks passed' })
   @ApiResponse({ status: 503, description: 'One or more checks failed' })

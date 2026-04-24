@@ -9,7 +9,7 @@ import { Queue } from 'bullmq';
 import { ConfigService } from '@nestjs/config';
 
 interface QueueDetail {
-  status: 'up' | 'down' | 'disabled';
+  status: 'up' | 'down';
   workers?: number;
   counts?: Record<string, number>;
   error?: string;
@@ -36,23 +36,38 @@ export class QueueHealthIndicator extends HealthIndicator {
 
     if (!jobsEnabled) {
       return this.getStatus(key, true, {
-        status: 'disabled',
-        reason: 'ENABLE_BACKGROUND_JOBS is not enabled',
+        mode: 'disabled',
+        reason: 'ENABLE_BACKGROUND_JOBS is not set',
       });
     }
 
-    const queues: Array<{ name: string; queue: Queue; requiresWorkers: boolean }> =
-      [
-        { name: 'notifications', queue: this.notifications, requiresWorkers: true },
-        // DLQ is a retention queue — no processor is expected to run against it
-        { name: 'notifications-dlq', queue: this.dlq, requiresWorkers: false },
-        { name: 'export-queue', queue: this.exportQueue, requiresWorkers: true },
-        {
-          name: 'confession-draft-publisher',
-          queue: this.draftQueue,
-          requiresWorkers: true,
-        },
-      ];
+    const queues: Array<{
+      name: string;
+      queue: Queue;
+      requiresWorkers: boolean;
+    }> = [
+      {
+        name: 'notifications',
+        queue: this.notifications,
+        requiresWorkers: true,
+      },
+      // DLQ is a retention queue — no processor is expected to run against it
+      {
+        name: 'notifications-dlq',
+        queue: this.dlq,
+        requiresWorkers: false,
+      },
+      {
+        name: 'export-queue',
+        queue: this.exportQueue,
+        requiresWorkers: true,
+      },
+      {
+        name: 'confession-draft-publisher',
+        queue: this.draftQueue,
+        requiresWorkers: true,
+      },
+    ];
 
     const details: Record<string, QueueDetail> = {};
     let allHealthy = true;
@@ -78,8 +93,11 @@ export class QueueHealthIndicator extends HealthIndicator {
             counts,
           };
         } catch (error: unknown) {
-          const message = error instanceof Error ? error.message : String(error);
-          this.logger.error(`Queue health check failed for "${name}": ${message}`);
+          const message =
+            error instanceof Error ? error.message : String(error);
+          this.logger.error(
+            `Queue health check failed for "${name}": ${message}`,
+          );
           allHealthy = false;
           details[name] = { status: 'down', error: message };
         }

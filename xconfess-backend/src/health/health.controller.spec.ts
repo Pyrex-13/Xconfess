@@ -7,27 +7,32 @@ import { QueueHealthIndicator } from './queue.health';
 
 const UP = (key: string) => ({ [key]: { status: 'up' } });
 
-function makeHealthService(pass: boolean) {
-  return {
-    check: jest.fn().mockImplementation(async (checks: Array<() => Promise<unknown>>) => {
-      if (!pass) throw new Error('unhealthy');
-      const results = await Promise.all(checks.map((fn) => fn()));
-      return { status: 'ok', details: Object.assign({}, ...results) };
-    }),
-  };
-}
-
 describe('HealthController', () => {
   let controller: HealthController;
-  let healthService: ReturnType<typeof makeHealthService>;
 
-  const dbIndicator = { pingCheck: jest.fn().mockResolvedValue(UP('database')) };
+  const healthService = {
+    check: jest
+      .fn()
+      .mockImplementation((checks: Array<() => Promise<unknown>>) =>
+        Promise.all(checks.map((fn) => fn())).then((results) => ({
+          status: 'ok',
+          details: Object.assign({}, ...results),
+        })),
+      ),
+  };
+  const dbIndicator = {
+    pingCheck: jest.fn().mockResolvedValue(UP('database')),
+  };
   const redisIndicator = { isHealthy: jest.fn().mockResolvedValue(UP('redis')) };
-  const schemaIndicator = { isHealthy: jest.fn().mockResolvedValue(UP('schema')) };
-  const queueIndicator = { isHealthy: jest.fn().mockResolvedValue(UP('queues')) };
+  const schemaIndicator = {
+    isHealthy: jest.fn().mockResolvedValue(UP('schema')),
+  };
+  const queueIndicator = {
+    isHealthy: jest.fn().mockResolvedValue(UP('queues')),
+  };
 
-  async function buildController(pass = true) {
-    healthService = makeHealthService(pass);
+  beforeEach(async () => {
+    jest.clearAllMocks();
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [HealthController],
@@ -41,11 +46,10 @@ describe('HealthController', () => {
     }).compile();
 
     controller = module.get(HealthController);
-  }
+  });
 
   describe('GET /health/live', () => {
-    it('returns {status: ok} synchronously without calling any indicator', async () => {
-      await buildController();
+    it('returns {status: ok} without calling any indicator', () => {
       const result = controller.liveness();
       expect(result).toEqual({ status: 'ok' });
       expect(healthService.check).not.toHaveBeenCalled();
@@ -53,8 +57,7 @@ describe('HealthController', () => {
   });
 
   describe('GET /health/ready', () => {
-    it('delegates to HealthCheckService with all four checks', async () => {
-      await buildController();
+    it('delegates to HealthCheckService', async () => {
       await controller.readiness();
       expect(healthService.check).toHaveBeenCalledWith(
         expect.arrayContaining([
@@ -67,7 +70,6 @@ describe('HealthController', () => {
     });
 
     it('calls all four indicators', async () => {
-      await buildController();
       await controller.readiness();
       expect(dbIndicator.pingCheck).toHaveBeenCalledWith('database');
       expect(redisIndicator.isHealthy).toHaveBeenCalledWith('redis');
@@ -77,14 +79,7 @@ describe('HealthController', () => {
   });
 
   describe('GET /health (backward-compat alias)', () => {
-    it('delegates to HealthCheckService with all four checks', async () => {
-      await buildController();
-      await controller.check();
-      expect(healthService.check).toHaveBeenCalled();
-    });
-
-    it('calls all four indicators — same set as /health/ready', async () => {
-      await buildController();
+    it('calls the same four indicators as /health/ready', async () => {
       await controller.check();
       expect(dbIndicator.pingCheck).toHaveBeenCalledWith('database');
       expect(redisIndicator.isHealthy).toHaveBeenCalledWith('redis');

@@ -11,16 +11,24 @@ const QUEUE_NAMES = [
   'confession-draft-publisher',
 ] as const;
 
-/** Creates a mock BullMQ Queue with controllable return values. */
-function makeMockQueue(workers = 1, counts = { active: 0, waiting: 0, failed: 0, delayed: 0 }) {
+type QueueName = (typeof QUEUE_NAMES)[number];
+
+function makeMockQueue(
+  workers = 1,
+  counts = { active: 0, waiting: 0, failed: 0, delayed: 0 },
+) {
   return {
-    getWorkers: jest.fn().mockResolvedValue(new Array(workers).fill({ id: 'w1' })),
+    getWorkers: jest
+      .fn()
+      .mockResolvedValue(new Array(workers).fill({ id: 'w1' })),
     getJobCounts: jest.fn().mockResolvedValue(counts),
   };
 }
 
+type MockQueue = ReturnType<typeof makeMockQueue>;
+
 function buildModule(
-  queueOverrides: Partial<Record<(typeof QUEUE_NAMES)[number], ReturnType<typeof makeMockQueue>>>,
+  queueOverrides: Partial<Record<QueueName, MockQueue>>,
   jobsEnabled = true,
 ) {
   const queues = Object.fromEntries(
@@ -34,7 +42,11 @@ function buildModule(
         provide: ConfigService,
         useValue: {
           get: jest.fn((key: string) =>
-            key === 'ENABLE_BACKGROUND_JOBS' ? (jobsEnabled ? 'true' : 'false') : undefined,
+            key === 'ENABLE_BACKGROUND_JOBS'
+              ? jobsEnabled
+                ? 'true'
+                : 'false'
+              : undefined,
           ),
         },
       },
@@ -55,10 +67,10 @@ describe('QueueHealthIndicator', () => {
       indicator = module.get(QueueHealthIndicator);
     });
 
-    it('returns up with disabled status', async () => {
+    it('returns up with mode=disabled and skips queue checks', async () => {
       const result = await indicator.isHealthy('queues');
       expect(result.queues.status).toBe('up');
-      expect(result.queues).toMatchObject({ status: 'disabled' });
+      expect(result.queues).toMatchObject({ mode: 'disabled' });
     });
   });
 
@@ -94,12 +106,16 @@ describe('QueueHealthIndicator', () => {
       });
 
       it('marks the affected queue as down in the error detail', async () => {
+        expect.assertions(2);
         try {
           await indicator.isHealthy('queues');
         } catch (err) {
           expect(err).toBeInstanceOf(HealthCheckError);
-          const detail = (err as HealthCheckError).causes as Record<string, unknown>;
-          expect((detail.queues as Record<string, unknown>)['notifications']).toMatchObject({
+          const causes = (err as HealthCheckError).causes as Record<
+            string,
+            Record<string, unknown>
+          >;
+          expect(causes['queues']['notifications']).toMatchObject({
             status: 'down',
             workers: 0,
           });
@@ -127,11 +143,15 @@ describe('QueueHealthIndicator', () => {
 
     describe('and a queue throws during the check', () => {
       beforeEach(async () => {
-        const broken = {
-          getWorkers: jest.fn().mockRejectedValue(new Error('ECONNREFUSED')),
+        const broken: MockQueue = {
+          getWorkers: jest
+            .fn()
+            .mockRejectedValue(new Error('ECONNREFUSED')),
           getJobCounts: jest.fn().mockResolvedValue({}),
         };
-        const module: TestingModule = await buildModule({ 'export-queue': broken });
+        const module: TestingModule = await buildModule({
+          'export-queue': broken,
+        });
         indicator = module.get(QueueHealthIndicator);
       });
 
