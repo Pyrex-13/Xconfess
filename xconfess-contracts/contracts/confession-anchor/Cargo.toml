@@ -17,3 +17,7 @@ proptest = "1"
 [[test]]
 name = "adversarial"
 path = "tests/adversarial.rs"
+
+[[test]]
+name = "benchmarks"
+path = "tests/benchmarks.rs"
